@@ -7,6 +7,9 @@
   "private": true,
   "scripts": {
     "start": "bun src/index.ts",
+    "up": "bun scripts/up.ts",
+    "dashboard": "bun scripts/dashboard.ts",
+    "eval": "bun scripts/eval.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "report": "bun scripts/report.ts"
