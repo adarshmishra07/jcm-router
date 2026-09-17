@@ -18,7 +18,7 @@ const LOW_CONFIDENCE = 0.5;
 // JEV_PRICE_IN and JEV_PRICE_OUT override it.
 export const JEV_PRICE = { in: 0.042, out: 0 } as const;
 // Mirrors THRESHOLDS.FOLLOWUP_MIN_NOUL in src/routing-policy.ts.
-export const FOLLOWUP_MIN_NOUL = 0.7;
+export const FOLLOWUP_MIN_NOUL = 0.55;
 // Mirrors LIMITS in src/routing-policy.ts.
 const USER_MESSAGE_MAX_CHARS = 6000;
 const ASSISTANT_REPLY_MAX_CHARS = 2000;

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { buildState, overrideAlias, render, score, summarize, tierOf, type Answers, type Case } from "../scripts/eval.ts";
 
 const answers = (model: string, confidence: number, followup = 0.05): Answers => ({
@@ -115,5 +116,20 @@ describe("summary", () => {
     const withTokens = summarize([{ ...results[0]!, tokens: { input: 1_000_000, output: 100 } }]);
     expect(render(results, withTokens)).toContain("Run cost: $0.0420");
     expect(render(results, withTokens, { in: 1, out: 5 })).toContain("Run cost: $1.0005");
+  });
+});
+
+describe("drift guard", () => {
+  // The harness mirrors the follow-up threshold on purpose (it must not import src), so the two literals are
+  // compared as text. Both must be found: a missing literal is a failure, not a pass.
+  test("eval's FOLLOWUP_MIN_NOUL matches THRESHOLDS.FOLLOWUP_MIN_NOUL in the policy", () => {
+    const literal = (file: string, pattern: RegExp): string => {
+      const m = readFileSync(new URL(file, import.meta.url), "utf8").match(pattern);
+      expect(m?.[1], `${file} has no ${pattern}`).toBeDefined();
+      return m![1]!;
+    };
+    const harness = literal("../scripts/eval.ts", /^export const FOLLOWUP_MIN_NOUL = (\d+(?:\.\d+)?);$/m);
+    const policy = literal("../src/routing-policy.ts", /^\s*FOLLOWUP_MIN_NOUL: (\d+(?:\.\d+)?),$/m);
+    expect(harness).toBe(policy);
   });
 });
