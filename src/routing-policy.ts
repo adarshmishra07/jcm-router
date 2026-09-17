@@ -47,7 +47,9 @@ export const THRESHOLDS = {
   MODEL_MIN_CONFIDENCE: 0.5,
   EFFORT_MIN_CONFIDENCE: 0.5,
   // At or above this, reuse the previous decision for the conversation ("yes do it" after an opus plan).
-  FOLLOWUP_MIN_NOUL: 0.7,
+  // Tuned on the 41-case eval run against real Jev (39 correct): at 0.7 the bare follow-ups "hmm" (0.70) and
+  // "why?" (0.54) fell through to a fresh classification and went to haiku mid task; "yes do it" scored 0.92.
+  FOLLOWUP_MIN_NOUL: 0.55,
   // Never send a large context to haiku (200K window). Tokens estimated as body chars / 4.
   HAIKU_MAX_TOKENS: 150_000,
   // Main chat only. Above this many context tokens Jev is not asked at all: a switch would re-cache the whole

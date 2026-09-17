@@ -78,6 +78,12 @@ describe("decide", () => {
     expect(d).toMatchObject({ alias: "opus", effort: "high", source: "followup" });
   });
 
+  test("a bare short follow-up like \"hmm\" reuses the previous decision", () => {
+    expect(THRESHOLDS.FOLLOWUP_MIN_NOUL).toBeLessThanOrEqual(0.7); // "hmm" scored 0.70 on the eval run
+    const d = decide({ ...base, previous, answers: answers("haiku", 0.9, "low", 0.9, 0.7) });
+    expect(d).toMatchObject({ alias: "opus", effort: "high", source: "followup" });
+  });
+
   test("ignores follow-up signal without a previous decision", () => {
     const d = decide({ ...base, answers: answers("haiku", 0.95, "low", 0.95, 0.99) });
     expect(d).toMatchObject({ alias: "haiku", source: "jev" });
