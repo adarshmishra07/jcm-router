@@ -174,7 +174,14 @@ export const handler = (path: string) => async (req: Request): Promise<Response>
   if (url.pathname === "/api.json") {
     return Response.json(await readSummary(path), { headers: { "cache-control": "no-store" } });
   }
-  if (url.pathname === "/") return new Response(renderPage(await readSummary(path)), { headers: { "content-type": "text/html; charset=utf-8" } });
+  if (url.pathname === "/") {
+    const summary = await readSummary(path);
+    // ?share=1 blanks the prompt previews so a screenshot can be posted publicly.
+    const shown = url.searchParams.get("share") === "1"
+      ? { ...summary, rows: summary.rows?.map((r) => ({ ...r, prompt: "" })) }
+      : summary;
+    return new Response(renderPage(shown), { headers: { "content-type": "text/html; charset=utf-8" } });
+  }
   return new Response("not found", { status: 404 });
 };
 

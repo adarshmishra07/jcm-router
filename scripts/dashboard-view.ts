@@ -18,6 +18,8 @@ export type DashboardData = {
     recached_tokens?: number;
   };
   rows?: Array<Record<string, string | number | null | undefined>>;
+  // Counterfactual, never netted into the spend above: re-caching that skipped switches avoided.
+  avoided?: { skips?: number; tokens?: number; usd?: number };
   jev?: {
     count?: number;
     p50?: number;
@@ -93,6 +95,11 @@ function render(input: unknown): string {
     (num(c.switches)
       ? '<p class="sub">' + int(c.switches) + " requests were switched to another model; " + int(c.recaches) +
         " of those had to rebuild the prompt cache (" + tokens(c.recached_tokens) + " tokens written again).</p>"
+      : "") +
+    (num(d.avoided?.skips)
+      ? '<p class="sub">' + int(d.avoided?.skips) + " switches were skipped because they would not have paid off, avoiding " +
+        tokens(d.avoided?.tokens) + " tokens of re-caching (about " + money(d.avoided?.usd) +
+        "). That is a counterfactual and is not part of the figures above.</p>"
       : "") +
     "</section>";
 
