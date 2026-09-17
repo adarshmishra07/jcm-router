@@ -44,8 +44,12 @@ export type Effort = keyof typeof EFFORTS;
 // Starting values. Tune with ROUTER_DRY_RUN=1 and the decision log.
 export const THRESHOLDS = {
   // Below these, keep whatever Claude Code asked for (model and effort are gated separately).
-  MODEL_MIN_CONFIDENCE: 0.5,
-  EFFORT_MIN_CONFIDENCE: 0.5,
+  // 0.7 came from sweeping the 41-case eval run: every model choice Jev acted on was correct at every
+  // floor from 0.4 to 0.9, and no case sat between 0.5 and 0.7, so raising the bar to 0.7 gave up nothing
+  // measurable. Above 0.75 it starts discarding correct calls, which is savings, for no measured accuracy.
+  // Confidence here is derived from the spread across the options, so chance on four models is 0.25, not 0.5.
+  MODEL_MIN_CONFIDENCE: 0.7,
+  EFFORT_MIN_CONFIDENCE: 0.7,
   // At or above this, reuse the previous decision for the conversation ("yes do it" after an opus plan).
   // Tuned on the 41-case eval run against real Jev (39 correct): at 0.7 the bare follow-ups "hmm" (0.70) and
   // "why?" (0.54) fell through to a fresh classification and went to haiku mid task; "yes do it" scored 0.92.
