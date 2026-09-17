@@ -4,7 +4,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type LogRecord, parseJournal, recordCost } from "./cost.ts";
+import { avoidedCost, type LogRecord, parseJournal, recordCost } from "./cost.ts";
 
 export const DEFAULT_PORT = 8788;
 const RECENT = 100;
@@ -12,6 +12,7 @@ const PREVIEW = 90;
 const CONFIDENCE_BUCKETS = [0.5, 0.7, 0.9] as const;
 
 export type Totals = { requests: number; actual: number; baseline: number; delta: number };
+export type Avoided = { skips: number; tokens: number; usd: number };
 export type Row = Record<string, string | number>;
 
 export type Summary = {
@@ -20,6 +21,8 @@ export type Summary = {
   records: number;
   unpriced: number;
   verdict: { overall: Totals; main: Totals; subagent: Totals };
+  // Counterfactual, kept apart from the measured spend in `verdict` on purpose: no request was made.
+  avoided: Avoided;
   cache: { byModel: Row[]; switches: number; recaches: number; recached_tokens: number };
   rows: Row[];
   jev: {
@@ -59,6 +62,16 @@ function totals(records: LogRecord[]): Totals {
   );
 }
 
+function avoided(records: LogRecord[]): Avoided {
+  return records.reduce<Avoided>(
+    (acc, r) => {
+      const a = avoidedCost(r);
+      return a ? { skips: acc.skips + 1, tokens: acc.tokens + a.tokens, usd: acc.usd + a.usd } : acc;
+    },
+    { skips: 0, tokens: 0, usd: 0 },
+  );
+}
+
 function cacheHealth(records: LogRecord[]): Summary["cache"] {
   const withUsage = records.filter((r) => r.usage);
   const byModel = [...group(withUsage, (r) => str(r.routed?.model, "unknown"))].map(([model, rs]) => {
@@ -74,7 +87,8 @@ function cacheHealth(records: LogRecord[]): Summary["cache"] {
     };
   });
   const switched = records.filter((r) => recordCost(r).switched);
-  const recached = switched.filter((r) => num(r.usage?.cache_creation_input_tokens) > 0);
+  // Only a switch that started from a cold cache re-wrote the history; the rest is a tool loop's normal growth.
+  const recached = records.filter((r) => recordCost(r).dumped);
   return {
     byModel,
     switches: switched.length,
@@ -139,6 +153,7 @@ export function summarize(records: LogRecord[], log = ""): Summary {
       main: totals(byKind.get("main") ?? []),
       subagent: totals(byKind.get("subagent") ?? []),
     },
+    avoided: avoided(records),
     cache: cacheHealth(records),
     rows: recentRows(records),
     jev: jevHealth(records),
@@ -263,7 +278,9 @@ function render(s) {
     ['<div class="stat"><b>' + money(v.overall.actual) + "</b><span>actual spend</span></div>",
      '<div class="stat"><b>' + money(v.overall.baseline) + "</b><span>baseline (no router)</span></div>",
      '<div class="stat"><b class="' + (saving ? "under-fg" : "over-fg") + '">' + money(v.overall.delta) + "</b><span>delta</span></div>",
-     '<div class="stat"><b>' + int(s.cache.recaches) + "</b><span>switches that re-cached " + int(s.cache.recached_tokens) + " tokens</span></div>"].join("") +
+     '<div class="stat"><b>' + int(s.cache.recaches) + "</b><span>switches that re-cached " + int(s.cache.recached_tokens) + " tokens</span></div>",
+     '<div class="stat"><b class="under-fg">' + money(s.avoided.usd) + "</b><span>re-caching avoided by " + int(s.avoided.skips) +
+       " skips (" + int(s.avoided.tokens) + " tokens). Counterfactual: no such request was made, so it is not in the spend above.</span></div>"].join("") +
     "</div>";
 
   document.getElementById("cache").innerHTML =

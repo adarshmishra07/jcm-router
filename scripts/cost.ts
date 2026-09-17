@@ -43,6 +43,10 @@ export type LogRecord = {
   jev_error?: string;
   prompt_preview?: string;
   context_tokens?: number;
+  context_source?: string;
+  stay_cost?: number;
+  switch_cost?: number;
+  avoided_recache_cost?: number;
   upstream?: { status?: number; ms_to_headers?: number; retried_with_original?: boolean };
   usage?: Usage | null;
 };
@@ -52,8 +56,14 @@ export type RecordCost = {
   baseline: number;
   delta: number;
   switched: boolean;
+  // This request threw away a warm prompt cache because the router moved the conversation to another model.
+  dumped: boolean;
   priced: boolean;
 };
+
+// The sources where the router picked the model on this very request. A skip, a tool-loop continuation and a
+// fallback all run on whatever the conversation was already on, so none of them can have dumped a cache.
+const CHOOSING_SOURCES = ["jev", "override", "followup"];
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
@@ -72,19 +82,27 @@ export function costOf(usage: Usage | null | undefined, price: Price): number {
   return (input + read + written + output) / PER_MTOK;
 }
 
-// Baseline is the same usage priced at the model Claude Code asked for. When the router
-// switched models the prompt cache was dumped, so the tokens it had to re-cache would have
-// been a plain cache read without the router.
+// Baseline is the same usage priced at the model Claude Code asked for. Re-cached tokens only belong in the
+// baseline as a cache read when the router's switch is what threw a warm cache away. The ordinary cache growth
+// of a tool loop, and a first request that starts cold, would have been written without the router too, so
+// crediting those to the router (as this did) inflated the baseline on every continuation in the log.
+// Known ceiling: a conversation's first request and a cache the router dumped look identical here (new turn,
+// nothing read, everything written), so the first one is counted as a dump. That overstates the router's cost
+// by one request per conversation rather than flattering it.
 export function recordCost(r: LogRecord): RecordCost {
   const routedPrice = priceFor(r.routed?.model);
   const requestedPrice = priceFor(r.requested?.model);
-  const switched = Boolean(r.routed?.model && r.requested?.model && r.routed.model !== r.requested.model);
+  // A dry run journals the model it would have picked but forwards the request unchanged, so the money was
+  // spent at the requested model and there is no difference to price.
+  const dryRun = r.source === "dry_run";
+  const switched = !dryRun && Boolean(r.routed?.model && r.requested?.model && r.routed.model !== r.requested.model);
   if (!r.usage || !routedPrice || !requestedPrice) {
-    return { actual: 0, baseline: 0, delta: 0, switched, priced: false };
+    return { actual: 0, baseline: 0, delta: 0, switched, dumped: false, priced: false };
   }
-  const actual = costOf(r.usage, routedPrice);
   const created = num(r.usage.cache_creation_input_tokens);
-  const baselineUsage: Usage = switched
+  const dumped = switched && r.turn === "new" && CHOOSING_SOURCES.includes(r.source ?? "") && num(r.usage.cache_read_input_tokens) === 0 && created > 0;
+  const actual = costOf(r.usage, dryRun ? requestedPrice : routedPrice);
+  const baselineUsage: Usage = dumped
     ? {
         ...r.usage,
         cache_read_input_tokens: num(r.usage.cache_read_input_tokens) + created,
@@ -92,7 +110,17 @@ export function recordCost(r: LogRecord): RecordCost {
       }
     : r.usage;
   const baseline = costOf(baselineUsage, requestedPrice);
-  return { actual, baseline, delta: actual - baseline, switched, priced: true };
+  return { actual, baseline, delta: actual - baseline, switched, dumped, priced: true };
+}
+
+// What a skipped turn avoided: the extra a switch would have cost over staying put, and the tokens it would
+// have had to write again. A counterfactual, never money that was spent, so it never joins actual or baseline.
+// It is only as good as the record's context size, which is the chars estimate until the router has measured
+// that conversation (see context_source).
+export function avoidedCost(r: LogRecord): { tokens: number; usd: number } | null {
+  if (r.source !== "skipped" || r.stay_cost === undefined) return null;
+  const moved = r.switch_cost ?? r.avoided_recache_cost;
+  return moved === undefined ? null : { tokens: num(r.context_tokens), usd: moved - r.stay_cost };
 }
 
 export function parseJournal(text: string): LogRecord[] {

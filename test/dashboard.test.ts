@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { priceFor, recordCost, parseJournal, type LogRecord } from "../scripts/cost.ts";
+import { avoidedCost, priceFor, recordCost, parseJournal, type LogRecord } from "../scripts/cost.ts";
 import { PAGE, readSummary, sourceLabel, summarize } from "../scripts/dashboard.ts";
 
 const record = (over: Partial<LogRecord>): LogRecord => ({
@@ -31,6 +31,39 @@ const subagentSaving = record({
   routed: { alias: "haiku", model: "claude-haiku-4-5", effort: null },
   usage: { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 5000, cache_creation_input_tokens: 0 },
 });
+
+// Same models, but a tool-loop continuation: the cache was warm and only grew by 10K.
+const switchedContinuation = record({
+  at: "2026-09-17T07:02:00.000Z",
+  turn: "continuation",
+  source: "cached",
+  requested: { model: "claude-opus-5", effort: "high" },
+  routed: { alias: "haiku", model: "claude-haiku-4-5", effort: null },
+  usage: { input_tokens: 10, output_tokens: 100, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 10_000 },
+});
+
+// A main turn the router refused to move: it runs on the opus it was pinned to, and never asked Jev, so the
+// counterfactual is a re-cache on opus.
+const skipped = record({
+  at: "2026-09-17T07:03:00.000Z",
+  source: "skipped",
+  skip_reason: "context_too_large",
+  routed: { alias: "opus", model: "claude-opus-5", effort: "high" },
+  context_tokens: 200_000,
+  context_source: "measured",
+  stay_cost: 0.1,
+  avoided_recache_cost: 2,
+  usage: { input_tokens: 10, output_tokens: 100, cache_read_input_tokens: 200_000, cache_creation_input_tokens: 0 },
+});
+
+const dryRun = record({
+  at: "2026-09-17T07:04:00.000Z",
+  source: "dry_run",
+  routed: { alias: "opus", model: "claude-opus-5", effort: "high" },
+  usage: { input_tokens: 10, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 50_000 },
+});
+
+const usd = (n: number) => n / 1_000_000;
 
 describe("pricing", () => {
   test("matches a model family inside the id", () => {
@@ -65,6 +98,38 @@ describe("pricing", () => {
     expect(c.delta).toBeLessThan(0);
   });
 
+  test("a tool loop that only grew its cache is not a dump, so the baseline pays that write too", () => {
+    const c = recordCost(switchedContinuation);
+    expect(c.switched).toBe(true);
+    expect(c.dumped).toBe(false);
+    expect(c.actual).toBeCloseTo(usd(10 * 1 + 90_000 * 0.1 + 10_000 * 2 + 100 * 5), 12);
+    expect(c.baseline).toBeCloseTo(usd(10 * 5 + 90_000 * 0.5 + 10_000 * 10 + 100 * 25), 12);
+  });
+
+  test("a skipped turn is priced on the model it stayed on, with no re-cache credit", () => {
+    const c = recordCost(skipped);
+    expect(c.dumped).toBe(false);
+    expect(c.actual).toBeCloseTo(usd(10 * 5 + 200_000 * 0.5 + 100 * 25), 12);
+    expect(c.baseline).toBeCloseTo(usd(10 * 2 + 200_000 * 0.2 + 100 * 10), 12);
+  });
+
+  test("a dry run is priced at the model that actually served it", () => {
+    const c = recordCost(dryRun);
+    expect(c.switched).toBe(false);
+    expect(c.dumped).toBe(false);
+    expect(c.actual).toBeCloseTo(c.baseline, 12);
+    expect(c.delta).toBeCloseTo(0, 12);
+  });
+
+  test("what a skip avoided is a counterfactual, taken from whichever cost the skip recorded", () => {
+    expect(avoidedCost(skipped)).toMatchObject({ tokens: 200_000 });
+    expect(avoidedCost(skipped)!.usd).toBeCloseTo(1.9, 10);
+    // A guard skip priced a real target, so its switch_cost is the one to use.
+    expect(avoidedCost(record({ source: "skipped", stay_cost: 0.07, switch_cost: 3.6, context_tokens: 360_000 }))!.usd).toBeCloseTo(3.53, 10);
+    expect(avoidedCost(record({}))).toBeNull();
+    expect(avoidedCost(record({ source: "skipped" }))).toBeNull();
+  });
+
   test("records without usage or with an unknown model are unpriced, not crashes", () => {
     expect(recordCost(record({ usage: null }))).toMatchObject({ priced: false, actual: 0, baseline: 0 });
     expect(recordCost(record({ routed: { model: "some-future-model" } }))).toMatchObject({ priced: false });
@@ -83,6 +148,15 @@ describe("summarize", () => {
     expect(s.verdict.main.delta).toBeGreaterThan(0);
     expect(s.verdict.subagent.delta).toBeLessThan(0);
     expect(s.verdict.overall.delta).toBeCloseTo(s.verdict.main.delta + s.verdict.subagent.delta, 10);
+  });
+
+  test("avoided re-caching is summed per skip and stays out of the measured spend", () => {
+    const withSkip = summarize([record({}), skipped]);
+    expect(withSkip.avoided.skips).toBe(1);
+    expect(withSkip.avoided.tokens).toBe(200_000);
+    expect(withSkip.avoided.usd).toBeCloseTo(1.9, 10);
+    expect(withSkip.verdict.overall.actual).toBeCloseTo(recordCost(record({})).actual + recordCost(skipped).actual, 12);
+    expect(summarize([record({})]).avoided).toEqual({ skips: 0, tokens: 0, usd: 0 });
   });
 
   test("counts switches and re-cached tokens", () => {
