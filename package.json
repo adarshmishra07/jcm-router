@@ -12,7 +12,8 @@
     "eval": "bun scripts/eval.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "report": "bun scripts/report.ts"
+    "report": "bun scripts/report.ts",
+    "tune": "bun scripts/tune.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
