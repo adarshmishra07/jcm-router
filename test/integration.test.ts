@@ -127,7 +127,10 @@ const mainBody = (first: string, extraMessages: unknown[] = [], firstExtra: Reco
 const LARGE_CHARS = (THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS + 1000) * 4;
 const largeBody = (first: string, prompt: string) =>
   mainBody(first, [{ role: "assistant", content: [text("x".repeat(LARGE_CHARS))] }, { role: "user", content: [text(prompt)] }]);
-const subagentBody = (prompt: string) => ({ ...mainBody(prompt), system: "You are an agent for Claude Code, Anthropic's official CLI for Claude. Given the user's message..." });
+const subagentBody = (prompt: string, extraMessages: unknown[] = []) => ({
+  ...mainBody(prompt, extraMessages),
+  system: "You are an agent for Claude Code, Anthropic's official CLI for Claude. Given the user's message...",
+});
 
 const post = async (server: ReturnType<typeof startServer>, body: unknown, path = "/v1/messages") => {
   const res = await fetch(`http://localhost:${server.port}${path}`, {
@@ -361,6 +364,44 @@ describe("proxy", () => {
     expect(await lastJson()).toMatchObject({ alias: "opus", effort: "high", source: "skipped", skipReason: "context_too_large" });
     const record = (await journal()).at(-1)!;
     expect(record).toMatchObject({ context_source: "measured", context_tokens: THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS + 11 });
+  });
+
+  // The ceiling has to read the same size the rest of the decision path reads. A body of a few hundred chars
+  // whose conversation the API measured at 163K is exactly the case the estimate cannot see.
+  test("a measured context over the haiku ceiling never reaches haiku, a small measured one still does", async () => {
+    jevAnswers = { ...jevAnswers, model: "haiku", effort: "low" };
+    const reply = { role: "assistant", content: [text("done")] };
+    const nextTurn = (first: string) => subagentBody(first, [reply, { role: "user", content: [text("now the next bit")] }]);
+
+    upstreamUsage = { ...DEFAULT_USAGE, cache_read_input_tokens: 163_000 };
+    await post(proxy, subagentBody("big subagent chat"));
+    await Bun.sleep(20); // the usage lands once the stream has drained
+    await post(proxy, nextTurn("big subagent chat"));
+    const big = (await journal()).at(-1)!;
+    expect(big).toMatchObject({ turn: "new", context_source: "measured", routed: { alias: "sonnet", model: "claude-sonnet-5" } });
+    expect(big.context_tokens).toBeGreaterThan(THRESHOLDS.HAIKU_MAX_TOKENS);
+    expect(upstreamSeen.at(-1)!.body?.model).toBe("claude-sonnet-5");
+
+    upstreamUsage = { ...DEFAULT_USAGE, cache_read_input_tokens: 40_000 };
+    await post(proxy, subagentBody("small subagent chat"));
+    await Bun.sleep(20);
+    await post(proxy, nextTurn("small subagent chat"));
+    const small = (await journal()).at(-1)!;
+    expect(small).toMatchObject({ turn: "new", context_source: "measured", routed: { alias: "haiku", model: "claude-haiku-4-5" } });
+    expect(small.context_tokens).toBeLessThan(THRESHOLDS.HAIKU_MAX_TOKENS);
+    expect(upstreamSeen.at(-1)!.body?.model).toBe("claude-haiku-4-5");
+  });
+
+  test("a tool loop whose measured context outgrows haiku stops sending haiku", async () => {
+    jevAnswers = { ...jevAnswers, model: "haiku", effort: "low" };
+    upstreamUsage = { ...DEFAULT_USAGE, cache_read_input_tokens: 163_000 };
+    await post(proxy, subagentBody("loop that grows"));
+    expect(upstreamSeen[0]!.body?.model).toBe("claude-haiku-4-5");
+    await Bun.sleep(20);
+
+    await post(proxy, subagentBody("loop that grows", [toolUse, toolResult()]));
+    expect(upstreamSeen[1]!.body?.model).toBe("claude-sonnet-5");
+    expect((await journal()).at(-1)).toMatchObject({ turn: "continuation", source: "cached", routed: { alias: "sonnet" } });
   });
 
   test("ROUTER_SCOPE=subagents skips all main traffic and still routes subagents", async () => {

@@ -54,7 +54,8 @@ export const THRESHOLDS = {
   // Tuned on the 41-case eval run against real Jev (39 correct): at 0.7 the bare follow-ups "hmm" (0.70) and
   // "why?" (0.54) fell through to a fresh classification and went to haiku mid task; "yes do it" scored 0.92.
   FOLLOWUP_MIN_NOUL: 0.55,
-  // Never send a large context to haiku (200K window). Tokens estimated as body chars / 4.
+  // Never send a large context to haiku (200K window). Sized like every other gate: the measured prompt
+  // size when the conversation has one, the body-chars estimate only on its first turn.
   HAIKU_MAX_TOKENS: 150_000,
   // Main chat only. Above this many context tokens Jev is not asked at all: a switch would re-cache the whole
   // history. A fresh Claude Code chat already carries 50 to 70K tokens of system prompt and tool schemas.
@@ -102,6 +103,12 @@ export function skipBeforeAsking(input: { kind: RequestKind | undefined; context
 }
 
 export type Target = { alias: ModelAlias | null; effort: Effort | null };
+
+// Haiku's window is 200K, so past the ceiling the context does not fit whatever chose it. Every path that turns
+// an alias into a request goes through here: a fresh decision, and a cached one whose conversation has grown
+// past the ceiling since it was made.
+export const capForContext = (alias: ModelAlias | null, contextTokens: number): ModelAlias | null =>
+  alias === "haiku" && contextTokens > THRESHOLDS.HAIKU_MAX_TOKENS ? "sonnet" : alias;
 
 const EFFORT_ORDER = Object.keys(EFFORTS) as Effort[];
 

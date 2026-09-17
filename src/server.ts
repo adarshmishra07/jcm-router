@@ -10,7 +10,7 @@ import { appendRecord, formatLine, writeLastDecision, PROMPT_PREVIEW_CHARS, type
 import { askJev, type JevClient, type JevResult } from "./jev.ts";
 import { forward, isRewriteRejection, withoutLongContextBeta } from "./proxy.ts";
 import { applyDecision } from "./rewrite.ts";
-import { MODELS, QUESTIONS, buildState, skipBeforeAsking, type ScopePolicy } from "./routing-policy.ts";
+import { MODELS, QUESTIONS, buildState, capForContext, skipBeforeAsking, type ScopePolicy } from "./routing-policy.ts";
 import { teeUsage } from "./usage.ts";
 
 export type ServerOptions = {
@@ -88,7 +88,10 @@ export function startServer(o: ServerOptions) {
       const cached = cache.get(turn.key);
       if (!cached) return forward(o.upstream, req, text);
       const { skipReason: _skip, cost: _cost, ...rest } = cached; // the guard ran once, on the new turn
-      decision = { ...rest, source: "cached", at: new Date().toISOString() };
+      // The ceiling is the exception: a tool loop grows, and the measured size may have passed what haiku holds
+      // since the turn was decided.
+      const alias = capForContext(cached.alias, contextTokens);
+      decision = { ...rest, alias, model: alias ? MODELS[alias].id : cached.model, source: "cached", at: new Date().toISOString() };
     } else {
       ({ decision, jev } = await routeNewTurn(turn, requested, contextTokens, requestKind(body)));
     }

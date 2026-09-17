@@ -1,7 +1,7 @@
 // Turns Jev answers, manual overrides, the previous decision and the scope policy into one concrete Decision.
 
 import type { JevAnswer, JevAnswers } from "./jev.ts";
-import { EFFORTS, MODELS, THRESHOLDS, blocksUpgrade, guardSwitch, skipCost, type Effort, type ModelAlias, type ScopePolicy, type SkipReason, type SwitchCost, type Target } from "./routing-policy.ts";
+import { EFFORTS, MODELS, THRESHOLDS, blocksUpgrade, capForContext, guardSwitch, skipCost, type Effort, type ModelAlias, type ScopePolicy, type SkipReason, type SwitchCost, type Target } from "./routing-policy.ts";
 
 export type DecisionSource = "jev" | "override" | "followup" | "fallback" | "cached" | "skipped";
 
@@ -78,8 +78,7 @@ export function decide(input: {
   const chosenAlias = overrides.alias ?? (followup ? previous.alias : isAlias(jevAlias) ? jevAlias : null) ?? aliasOfModel(requested.model);
   const chosenEffort = overrides.effort ?? (followup ? previous.effort : isEffort(jevEffort) ? jevEffort : null) ?? requested.effort;
 
-  const tooBigForHaiku = input.contextTokens > THRESHOLDS.HAIKU_MAX_TOKENS;
-  const alias = chosenAlias === "haiku" && tooBigForHaiku ? "sonnet" : chosenAlias;
+  const alias = capForContext(chosenAlias, input.contextTokens);
   const effort = alias && !MODELS[alias].supportsEffort ? null : chosenEffort;
 
   // Where this conversation's prompt cache lives. Claude Code always sends the launched model, so after a routed
