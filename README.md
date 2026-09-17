@@ -47,6 +47,8 @@ All configuration comes from the environment (Bun loads `.env` automatically). I
 | `ROUTER_DRY_RUN` | `0` | `1`: log decisions, forward everything unchanged. |
 | `ROUTER_LOG_PROMPTS` | `1` | `0`: keep prompt previews out of `decisions.jsonl`. |
 | `ROUTER_STATE_DIR` | `~/.claude-router` | Where `last.json` and `decisions.jsonl` are written. |
+| `ROUTER_SCOPE` | `all` | `all`: route subagents and the main chat, the latter only while a switch is cheap (see [Scope](#scope-where-switching-pays-off)). `subagents`: never touch the main chat. |
+| `ROUTER_MAIN_UPGRADES` | `0` | `1`: a main-chat turn whose context is too large may still be upgraded to a more expensive model when Jev is confident it is hard. Never downgraded. Deliberately spends more for quality. |
 
 `ANTHROPIC_API_KEY` is not needed. Authentication comes from the headers Claude Code sends.
 
@@ -65,6 +67,19 @@ Only requests to `/v1/messages` that carry a non-empty `tools` array are routed.
 **Sticky during tool loops.** Once decided, the model and effort are cached for that turn and reused for every tool-result continuation, so a task never switches model mid way (prompt caches are per model, so a switch would also be a cache miss). If the proxy restarts mid loop, the loop passes through unchanged.
 
 **Follow-ups.** If `is_followup` is at least `FOLLOWUP_MIN_NOUL` (0.7) and there is a decision for the previous turn, that decision is reused. "Yes do it" after an Opus plan stays on Opus.
+
+### Scope: where switching pays off
+
+Prompt caches are scoped to the model. Switching model mid conversation throws away the cached history and writes it again on the new model, and a mid-conversation `output_config.effort` change invalidates the messages cache too. Measured on a real session: the main chat sat at ~360K tokens, every switch showed `cache_read_input_tokens: 0, cache_creation_input_tokens: 360370`, and over 86 requests the router cost $35.75 against $15.33 for doing nothing. Subagent routing was the part that saved money: a fresh, small context with nothing cached to lose.
+
+So the router asks two questions before it asks Jev, all in [`src/routing-policy.ts`](src/routing-policy.ts):
+
+- `subagent` requests are always routed.
+- `main` requests (and anything not identifiably Claude Code, treated as main) are routed only while a switch is cheap. First a size gate, `MAIN_MAX_CONTEXT_TOKENS` (100K; a fresh Claude Code chat already carries 50 to 70K tokens of system prompt and tool schemas), above which Jev is not called at all. Below it, `switchPaysOff` in [`src/cost.ts`](src/cost.ts) prices the turn: staying reads the history from the cache on the current model (0.1x input), switching writes it on the target (2x input, the 1-hour TTL Claude Code uses). The switch goes ahead if it costs at most `MAIN_MAX_SWITCH_COST_USD` ($0.25) more than staying.
+
+"Current model" is the one the conversation was last routed to, not the one Claude Code sends (Claude Code always sends the launched model). Once a chat is past the gate it stays on whatever model it is on, so a chat that went to Opus while small stays on Opus rather than re-caching on Sonnet.
+
+Skipped turns are forwarded unchanged and still journaled with `source: "skipped"` and a `skip_reason` (`scope`, `context_too_large`, `switch_not_worth_it`), plus `context_tokens`, `stay_cost` and `switch_cost` in dollars, so the log explains itself. Manual overrides (`!opus`) win over every guard. Costs are for this turn only; the fresh input and output tokens are left out because they are small next to the history.
 
 **Subagents and forks.** Every request Claude Code makes goes through the proxy, including Agent tool subagents, forks and parallel agents. Each is routed on its own task prompt. Decisions are keyed by the task text plus the assistant reply it follows, so a fork that inherits its parent's history gets its own decision and never disturbs the parent's. Note: a `model:` set in an agent definition is overridden by the router like any other request, because the proxy cannot tell an explicit model from an inherited one. Put an override in the agent's prompt if you want a fixed model.
 
@@ -98,11 +113,12 @@ It reads `~/.claude-router/last.json` (or `ROUTER_STATE_DIR`), which the proxy r
 1. Terminal 1: `bun start`. Each routed request prints one line:
 
    ```
-   11:42:03  new   #e1b32bb7 main  fable/max     jev 0.99/0.68 295ms     200 in 1.6s  "Design a plan for migrating a monolith's auth"
-   11:42:09  cont  #e1b32bb7 main  fable/max     cached                  200 in 1.2s
+   11:42:03  new   #e1b32bb7 main  fable/max      58K  jev 0.99/0.68 295ms stay $0.012 switch $1.160  200 in 1.6s  "Design a plan for migrating a monolith's auth"
+   11:42:09  cont  #e1b32bb7 main  fable/max      59K  cached                  200 in 1.2s
+   11:43:30  new   #e1b32bb7 main  fable/max     121K  skipped context_too_large  200 in 1.1s  "yes do it"
    ```
 
-   `#e1b32bb7` identifies the conversation, `main`/`subagent` where the request came from, then the routed model/effort, how it was decided (Jev confidences for model/effort and latency, or cached, override, followup, fallback), the upstream status and time to first byte, and the prompt.
+   `#e1b32bb7` identifies the conversation, `main`/`subagent` where the request came from, then the routed model/effort, the estimated context size, how it was decided (Jev confidences for model/effort and latency plus the stay/switch cost of the turn, or cached, override, followup, fallback, skipped with its reason), the upstream status and time to first byte, and the prompt.
 
 2. Terminal 2: `clauder` (the alias above). Try a spread of prompts:
 
@@ -126,7 +142,8 @@ It reads `~/.claude-router/last.json` (or `ROUTER_STATE_DIR`), which the proxy r
 ## Known limits
 
 - Each new message costs one Jev call, typically 0.3 to 1s, before the request goes out.
-- Switching models is a prompt cache miss for that turn. Decisions stick for the tool loop to keep this rare.
+- Switching models (or effort) is a prompt cache miss for that turn. Decisions stick for the tool loop, and the main chat is only switched while that miss is cheap (see Scope). The router only knows which model a conversation is cached on while it has seen that conversation; after a proxy restart it assumes the requested model.
+- Token counts are estimated as body chars / 4, which overestimates JSON tool schemas. Good enough for a gate, not for billing.
 - Jev sees the text of your prompt and the previous reply. That text goes to a third party (TypeSafe). Use overrides or dry run if that is a problem for a given conversation.
 - Your subscription plan must include the models routed to. If it does not, the 4xx fallback kicks in and the original model is used.
 - Haiku 4.5 does not support effort or adaptive thinking, and its context is 200K. The proxy adapts requests for it, but a few Claude Code features may still be rejected; those fall back automatically.
