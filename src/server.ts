@@ -152,7 +152,7 @@ export function startServer(o: ServerOptions) {
     },
     error(err) {
       o.log(`proxy error: ${err.message}`);
-      return new Response(`claude-router: ${err.message}`, { status: 502 });
+      return new Response(`jcm-router: ${err.message}`, { status: 502 });
     },
   });
 }

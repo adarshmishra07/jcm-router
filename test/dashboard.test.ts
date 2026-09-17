@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { avoidedCost, priceFor, recordCost, parseJournal, type LogRecord } from "../scripts/cost.ts";
-import { PAGE, readSummary, sourceLabel, summarize } from "../scripts/dashboard.ts";
+import { handler, readSummary, sourceLabel, summarize } from "../scripts/dashboard.ts";
 
 const record = (over: Partial<LogRecord>): LogRecord => ({
   at: "2026-09-17T06:45:39.079Z",
@@ -222,11 +222,34 @@ describe("defensive parsing", () => {
     expect(s.jev.count).toBe(0);
   });
 
-  test("the page is self contained", () => {
-    expect(PAGE).toContain("<title>claude-router dashboard</title>");
-    expect(PAGE).toContain("/api.json");
-    expect(PAGE).toContain("prefers-color-scheme: dark");
-    expect(PAGE).not.toContain("http://cdn");
-    expect(PAGE).not.toMatch(/<script[^>]+src=/);
+});
+
+describe("serving", () => {
+  const missing = "/tmp/jcm-router-does-not-exist.jsonl";
+  const get = (path: string, log = missing) => handler(log)(new Request(`http://localhost${path}`));
+
+  test("the page is the new view, rendered from the log, and an empty log renders", async () => {
+    const res = await get("/");
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const html = await res.text();
+    expect(html).toContain("<title>jcm-router</title>");
+    expect(html).toContain("No decisions yet");
+    expect(html).toContain("/api.json");
+    expect(html).not.toContain("claude-router dashboard");
+  });
+
+  test("/api.json is the summary unchanged, avoided re-caching included", async () => {
+    const res = await get("/api.json");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const api = await res.json();
+    const { generated_at: _a, ...summary } = await readSummary(missing);
+    const { generated_at: _b, ...served } = api;
+    expect(served).toEqual(summary);
+    // Not shown by the view yet: it needs `avoided?: { skips?: number; tokens?: number; usd?: number }` on DashboardData.
+    expect(api.avoided).toEqual({ skips: 0, tokens: 0, usd: 0 });
+  });
+
+  test("anything else is a 404", async () => {
+    expect((await get("/nope")).status).toBe(404);
   });
 });

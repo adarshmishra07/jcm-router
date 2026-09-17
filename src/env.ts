@@ -84,7 +84,7 @@ export function parseEnv(env: Env): Parsed {
 export function loadEnv(): Config {
   const parsed = parseEnv(process.env);
   if (parsed.ok) return parsed.config;
-  console.error("claude-router: invalid environment. See .env.example.");
+  console.error("jcm-router: invalid environment. See .env.example.");
   for (const e of parsed.errors) console.error(`  - ${e}`);
   process.exit(1);
 }

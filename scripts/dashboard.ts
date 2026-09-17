@@ -1,10 +1,11 @@
 // Local dashboard for decisions.jsonl. Separate process from the proxy, no build step:
-// one HTML page plus a JSON endpoint that re-reads the log on every request.
+// one HTML page (scripts/dashboard-view.ts) plus a JSON endpoint, both re-reading the log on every request.
 // Usage: bun run dashboard [--port 8788]
 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { avoidedCost, type LogRecord, parseJournal, recordCost } from "./cost.ts";
+import { renderPage } from "./dashboard-view.ts";
 
 export const DEFAULT_PORT = 8788;
 const RECENT = 100;
@@ -168,154 +169,14 @@ export async function readSummary(path: string): Promise<Summary> {
   return summarize(parseJournal(text), path);
 }
 
-export const PAGE = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>claude-router dashboard</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b66; --line: #e2e2dd; --card: #fff;
-    --good: #0f7a4a; --goodbg: #e7f6ee; --bad: #a92c2c; --badbg: #fbeaea;
+export const handler = (path: string) => async (req: Request): Promise<Response> => {
+  const url = new URL(req.url);
+  if (url.pathname === "/api.json") {
+    return Response.json(await readSummary(path), { headers: { "cache-control": "no-store" } });
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #16161a; --fg: #ecece8; --muted: #9a9a94; --line: #2c2c33; --card: #1d1d22;
-      --good: #6fd39b; --goodbg: #173026; --bad: #f08a8a; --badbg: #331c1c;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
-    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  h1 { font-size: 16px; margin: 0 0 4px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 28px 0 8px; }
-  .meta { color: var(--muted); margin-bottom: 20px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
-  .verdict { font-size: 20px; line-height: 1.4; }
-  .verdict .lede { font-size: 24px; font-weight: 600; }
-  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 12px; }
-  .stat { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
-  .stat b { display: block; font-size: 18px; }
-  .stat span { color: var(--muted); font-size: 12px; }
-  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
-  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--bg); }
-  td.prompt { white-space: normal; max-width: 420px; color: var(--muted); }
-  td.num { text-align: right; }
-  tr.over td { background: var(--badbg); }
-  tr.under td { background: var(--goodbg); }
-  .over-fg { color: var(--bad); }
-  .under-fg { color: var(--good); }
-  .scroll { overflow: auto; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; }
-  .cols { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-</style>
-</head>
-<body>
-<h1>claude-router</h1>
-<div class="meta" id="meta">loading…</div>
-<div class="card verdict" id="verdict"></div>
-<h2>Cache health</h2>
-<div id="cache"></div>
-<h2>Decisions (most recent 100)</h2>
-<div class="scroll"><table id="decisions"></table></div>
-<h2>Jev health</h2>
-<div class="cols" id="jev"></div>
-<script>
-const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toFixed(4);
-const el = (html) => { const d = document.createElement("div"); d.innerHTML = html; return d; };
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const int = (n) => Number(n).toLocaleString();
-
-function table(rows, opts = {}) {
-  if (!rows.length) return '<p class="meta">(none)</p>';
-  const cols = Object.keys(rows[0]);
-  const head = cols.map((c) => "<th>" + esc(c) + "</th>").join("");
-  const body = rows
-    .map((r) => {
-      const cls = opts.rowClass ? opts.rowClass(r) : "";
-      const cells = cols.map((c) => {
-        const v = r[c];
-        const isNum = typeof v === "number";
-        const text = opts.format ? opts.format(c, v) : isNum ? int(v) : esc(v);
-        return '<td class="' + (isNum ? "num" : c) + '">' + text + "</td>";
-      });
-      return '<tr class="' + cls + '">' + cells.join("") + "</tr>";
-    })
-    .join("");
-  return "<thead><tr>" + head + "</tr></thead><tbody>" + body + "</tbody>";
-}
-
-function verdictLine(name, t) {
-  if (!t.requests) return "<div>" + name + ": no requests yet.</div>";
-  const saving = t.delta <= 0;
-  const cls = saving ? "under-fg" : "over-fg";
-  const word = saving ? "saved" : "cost you an extra";
-  return (
-    "<div>" + name + ": spent <b>" + money(t.actual) + "</b> against a no-router baseline of <b>" + money(t.baseline) +
-    '</b>, so the router <span class="' + cls + '">' + word + " " + money(Math.abs(t.delta)) + "</span> over " + int(t.requests) + " requests.</div>"
-  );
-}
-
-function render(s) {
-  document.getElementById("meta").textContent =
-    int(s.records) + " requests in " + s.log + (s.unpriced ? " (" + int(s.unpriced) + " without usage or a known price)" : "") +
-    " · updated " + new Date(s.generated_at).toLocaleTimeString();
-
-  const v = s.verdict;
-  const saving = v.overall.delta <= 0;
-  document.getElementById("verdict").innerHTML =
-    '<div class="lede ' + (saving ? "under-fg" : "over-fg") + '">' +
-    (v.overall.requests === 0
-      ? "No priced requests yet."
-      : saving
-        ? "The router is saving money: " + money(-v.overall.delta) + " so far."
-        : "The router is costing money: " + money(v.overall.delta) + " more than not routing at all.") +
-    "</div>" +
-    verdictLine("Overall", v.overall) + verdictLine("Main chat", v.main) + verdictLine("Subagents", v.subagent) +
-    '<div class="grid">' +
-    ['<div class="stat"><b>' + money(v.overall.actual) + "</b><span>actual spend</span></div>",
-     '<div class="stat"><b>' + money(v.overall.baseline) + "</b><span>baseline (no router)</span></div>",
-     '<div class="stat"><b class="' + (saving ? "under-fg" : "over-fg") + '">' + money(v.overall.delta) + "</b><span>delta</span></div>",
-     '<div class="stat"><b>' + int(s.cache.recaches) + "</b><span>switches that re-cached " + int(s.cache.recached_tokens) + " tokens</span></div>",
-     '<div class="stat"><b class="under-fg">' + money(s.avoided.usd) + "</b><span>re-caching avoided by " + int(s.avoided.skips) +
-       " skips (" + int(s.avoided.tokens) + " tokens). Counterfactual: no such request was made, so it is not in the spend above.</span></div>"].join("") +
-    "</div>";
-
-  document.getElementById("cache").innerHTML =
-    '<div class="scroll"><table>' +
-    table(s.cache.byModel.map((m) => ({ ...m, hit_rate: (m.hit_rate * 100).toFixed(1) + "%" }))) +
-    "</table></div>" +
-    '<p class="meta">' + int(s.cache.switches) + " requests went to a different model than Claude Code asked for; " +
-    int(s.cache.recaches) + " of those had to re-write the prompt cache.</p>";
-
-  document.getElementById("decisions").innerHTML = table(s.rows, {
-    rowClass: (r) => (typeof r.delta !== "number" ? "" : r.delta > 0 ? "over" : r.delta < 0 ? "under" : ""),
-    format: (c, v) => (c === "delta" && typeof v === "number" ? money(v) : typeof v === "number" ? int(v) : esc(v)),
-  });
-
-  document.getElementById("jev").innerHTML =
-    '<div><h2>Latency</h2><p>' + int(s.jev.count) + " calls · p50 " + int(s.jev.p50) + "ms · p95 " + int(s.jev.p95) + "ms</p>" +
-    "<h2>Model confidence</h2><table>" + table(s.jev.confidence) + "</table></div>" +
-    "<div><h2>Decision sources</h2><table>" + table(s.jev.sources) + "</table>" +
-    "<h2>Errors and fallbacks</h2><table>" + table(s.jev.errors) + "</table></div>";
-}
-
-async function tick() {
-  try {
-    const res = await fetch("/api.json", { cache: "no-store" });
-    render(await res.json());
-  } catch (err) {
-    document.getElementById("meta").textContent = "dashboard unreachable: " + err;
-  }
-}
-tick();
-setInterval(tick, 5000);
-</script>
-</body>
-</html>
-`;
+  if (url.pathname === "/") return new Response(renderPage(await readSummary(path)), { headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response("not found", { status: 404 });
+};
 
 if (import.meta.main) {
   const flag = process.argv.indexOf("--port");
@@ -325,16 +186,6 @@ if (import.meta.main) {
     process.exit(1);
   }
   const path = logPath();
-  const server = Bun.serve({
-    port,
-    fetch: async (req) => {
-      const url = new URL(req.url);
-      if (url.pathname === "/api.json") {
-        return Response.json(await readSummary(path), { headers: { "cache-control": "no-store" } });
-      }
-      if (url.pathname === "/") return new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } });
-      return new Response("not found", { status: 404 });
-    },
-  });
+  const server = Bun.serve({ port, fetch: handler(path) });
   console.log(`dashboard on http://localhost:${server.port} reading ${path}`);
 }

@@ -17,6 +17,6 @@ const server = startServer({
 });
 
 log(
-  `claude-router listening on http://localhost:${server.port}, upstream ${config.anthropicUpstream}, logs in ${config.stateDir}` +
+  `jcm-router listening on http://localhost:${server.port}, upstream ${config.anthropicUpstream}, logs in ${config.stateDir}` +
     (config.dryRun ? " (dry run: decisions are logged, requests forwarded unchanged)" : ""),
 );
