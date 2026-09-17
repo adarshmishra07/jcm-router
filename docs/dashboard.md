@@ -21,7 +21,10 @@ their own. Ports: `PORT` for the proxy (default 8787), `--port` for the dashboar
 exactly one key, `env.ANTHROPIC_BASE_URL`. `env-off.sh` removes that one key (and drops `env`
 if it becomes empty). Both validate the rewritten JSON before replacing the file, both are safe
 to run twice, and both need `jq`. Neither starts or stops the proxy: stopping is ctrl-c on
-`bun run up`. `~/.claude-router/revert.sh` does env-off plus killing a detached proxy.
+`bun run up`.
+
+The state directory is `~/.claude-router` (the `ROUTER_STATE_DIR` default), still named that from
+before the project was renamed to jcm-router.
 
 Claude Code reads settings at startup, so restart it after either script.
 
@@ -92,7 +95,9 @@ the eval measures a router you are not running.
 
 The prompt set is labeled by tier: `trivial` (should land on haiku), `normal` (sonnet), `hard`
 (opus or fable). Follow-up cases are scored differently: they pass when Jev's `is_followup`
-signal is at or above 0.7, because a follow-up reuses the previous decision instead of being
+signal is at or above the harness's own `FOLLOWUP_MIN_NOUL` (currently 0.7, while the router runs at
+0.55, so the harness is the stricter of the two), because a follow-up reuses the previous decision
+instead of being
 re-classified.
 
 - **`MODEL_MIN_CONFIDENCE`.** Compare mean confidence on hits versus misses. If hits average 0.9
@@ -105,8 +110,8 @@ re-classified.
 - **Confusion pairs** point at the criteria. `hard -> normal` misses cost you quality;
   `trivial -> hard` misses cost you money. Fix the tier descriptions in `src/routing-policy.ts`
   (then re-copy `eval/questions.json`) and re-run.
-- **`FOLLOWUP_MIN_NOUL`.** If the bare follow-ups ("yes do it", "continue", "hmm") score below
-  0.7, lower it; each miss re-classifies a continuation from scratch and can switch models
+- **`FOLLOWUP_MIN_NOUL`.** If the bare follow-ups ("yes do it", "continue", "hmm") score below the
+  threshold, lower it; each miss re-classifies a continuation from scratch and can switch models
   mid-conversation, which the dashboard will then show you as a re-cache.
 
 Overrides (`!haiku write me a compiler`) are decided before Jev is ever called, so the harness

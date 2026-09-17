@@ -1,7 +1,7 @@
 {
-  "name": "claude-router",
+  "name": "jcm-router",
   "version": "0.1.0",
-  "description": "Local proxy that picks a Claude model and effort per message for Claude Code, using TypeSafe Jev",
+  "description": "jcm-router: local proxy that picks a Claude model and effort per message for Claude Code, using TypeSafe Jev",
   "type": "module",
   "license": "MIT",
   "private": true,
