@@ -7,14 +7,17 @@ import { DEFAULT_PORT } from "./dashboard.ts";
 
 const DEFAULT_PROXY_PORT = 8787;
 
+// Both probes are needed: a wildcard bind does not clash with a loopback-only listener, and a
+// loopback bind does not clash with a wildcard one, so either probe alone misses half the cases.
 export function portInUse(port: number): boolean {
-  try {
-    const server = Bun.serve({ port, hostname: "127.0.0.1", fetch: () => new Response("") });
-    server.stop(true);
-    return false;
-  } catch {
-    return true;
-  }
+  return [undefined, "127.0.0.1"].some((hostname) => {
+    try {
+      Bun.serve({ port, hostname, fetch: () => new Response("") }).stop(true);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 }
 
 async function prefix(stream: ReadableStream<Uint8Array> | undefined, tag: string, to: (s: string) => void): Promise<void> {
@@ -53,7 +56,7 @@ if (import.meta.main) {
   const logs = join(process.env.ROUTER_STATE_DIR || join(homedir(), ".claude-router"), "decisions.jsonl");
   console.log(
     [
-      "claude-router is up",
+      "jcm-router is up",
       `  proxy      http://localhost:${proxyPort}   (point Claude Code at this)`,
       `  dashboard  http://localhost:${dashPort}`,
       `  logs       ${logs}`,
