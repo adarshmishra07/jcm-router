@@ -13,6 +13,10 @@ const JEV_PATH = "/v1/systemone";
 const TIMEOUT_MS = 10_000;
 const CONCURRENCY = 5;
 const LOW_CONFIDENCE = 0.5;
+// Jev pricing, USD per million tokens. Source: typesafe.ai homepage, checked 2026-09-17 ($42 per billion
+// input tokens, output free). TypeSafe publishes no /pricing page, so this homepage figure may drift.
+// JEV_PRICE_IN and JEV_PRICE_OUT override it.
+export const JEV_PRICE = { in: 0.042, out: 0 } as const;
 // Mirrors THRESHOLDS.FOLLOWUP_MIN_NOUL in src/routing-policy.ts.
 export const FOLLOWUP_MIN_NOUL = 0.7;
 // Mirrors LIMITS in src/routing-policy.ts.
@@ -184,7 +188,7 @@ export async function runEval(cases: Case[], questions: unknown, client: { url: 
 const pad = (v: string | number, w: number) => String(v).padEnd(w);
 const pctStr = (n: number) => `${(n * 100).toFixed(0)}%`;
 
-export function render(results: Result[], s: EvalSummary, price: { in: number; out: number } | null): string {
+export function render(results: Result[], s: EvalSummary, price: { in: number; out: number } = JEV_PRICE): string {
   const lines = [
     `${pad("result", 7)}${pad("expected", 9)}${pad("got", 11)}${pad("model/effort", 16)}${pad("conf", 6)}${pad("ms", 6)}prompt`,
     ...results.map((r) =>
@@ -211,17 +215,14 @@ export function render(results: Result[], s: EvalSummary, price: { in: number; o
     ...s.lowConfidence.map((c) => `  ${c.confidence.toFixed(2)} ${c.expected}->${c.got || "none"}  ${c.prompt.replace(/\s+/g, " ").slice(0, 60)}`),
     "",
     `Jev: ${s.jevCalls} calls, ${s.tokens.input} input + ${s.tokens.output} output tokens`,
-    price
-      ? `Run cost: $${((s.tokens.input * price.in + s.tokens.output * price.out) / 1_000_000).toFixed(4)} at $${price.in}/$${price.out} per MTok`
-      : "Run cost: not priced. TypeSafe does not publish a per-token price here; set JEV_PRICE_IN and JEV_PRICE_OUT (USD per MTok) to price the run.",
+    `Run cost: $${((s.tokens.input * price.in + s.tokens.output * price.out) / 1_000_000).toFixed(4)} at $${price.in} in / $${price.out} out per MTok`,
   ];
   return lines.join("\n");
 }
 
-function priceFromEnv(): { in: number; out: number } | null {
-  const i = Number(process.env.JEV_PRICE_IN);
-  const o = Number(process.env.JEV_PRICE_OUT);
-  return Number.isFinite(i) && Number.isFinite(o) && process.env.JEV_PRICE_IN && process.env.JEV_PRICE_OUT ? { in: i, out: o } : null;
+function priceFromEnv(): { in: number; out: number } {
+  const num = (raw: string | undefined, fallback: number) => (raw && Number.isFinite(Number(raw)) ? Number(raw) : fallback);
+  return { in: num(process.env.JEV_PRICE_IN, JEV_PRICE.in), out: num(process.env.JEV_PRICE_OUT, JEV_PRICE.out) };
 }
 
 if (import.meta.main) {

@@ -112,5 +112,7 @@ re-classified.
 Overrides (`!haiku write me a compiler`) are decided before Jev is ever called, so the harness
 marks them as such and excludes them from accuracy on Jev's behalf.
 
-TypeSafe does not publish a per-token price for Jev here, so the run reports token counts and
-prices the run only if you set `JEV_PRICE_IN` and `JEV_PRICE_OUT` (USD per million tokens).
+The run cost uses TypeSafe's homepage price (checked 2026-09-17): $0.042 per million input tokens,
+output free. There is no /pricing page, so it may drift; override with `JEV_PRICE_IN` and
+`JEV_PRICE_OUT` (USD per million tokens). The dashboard does not show Jev spend because decision
+records carry Jev latency but not its token counts, so there is nothing honest to sum.

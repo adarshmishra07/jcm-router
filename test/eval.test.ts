@@ -111,9 +111,9 @@ describe("summary", () => {
     expect(s.lowConfidence.map((c) => c.confidence)).toEqual([0.3, 0.45]);
   });
 
-  test("renders without a price and with one", () => {
-    const withTokens = summarize([{ ...results[0]!, tokens: { input: 1000, output: 100 } }]);
-    expect(render(results, s, null)).toContain("not priced");
-    expect(render(results, withTokens, { in: 1, out: 5 })).toContain("$0.0015");
+  test("prices the run at the Jev default and at an override", () => {
+    const withTokens = summarize([{ ...results[0]!, tokens: { input: 1_000_000, output: 100 } }]);
+    expect(render(results, withTokens)).toContain("Run cost: $0.0420");
+    expect(render(results, withTokens, { in: 1, out: 5 })).toContain("Run cost: $1.0005");
   });
 });
