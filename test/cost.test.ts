@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { CACHE_READ_MULTIPLIER, CACHE_WRITE_MULTIPLIER, PRICES, estimateContextTokens, switchPaysOff } from "../src/cost.ts";
+import { CACHE_READ as DASHBOARD_CACHE_READ, CACHE_WRITE as DASHBOARD_CACHE_WRITE, PRICES as DASHBOARD_PRICES } from "../scripts/cost.ts";
+import { CACHE_READ_MULTIPLIER, CACHE_WRITE_MULTIPLIER, CHARS_PER_TOKEN, PRICES, estimateContextTokens, recacheOnSameModel, switchPaysOff } from "../src/cost.ts";
 import { MODELS, THRESHOLDS, type ModelAlias } from "../src/routing-policy.ts";
 
 const maxSwitchCost = THRESHOLDS.MAIN_MAX_SWITCH_COST_USD;
@@ -14,9 +15,30 @@ describe("prices", () => {
     expect(PRICES.sonnet).toEqual({ input: 2, output: 10, cacheRead: 0.2, cacheWrite: 4 });
   });
 
-  test("estimateContextTokens is chars / 4, rounded up", () => {
+  test("estimateContextTokens uses the calibrated divisor, rounded up", () => {
     expect(estimateContextTokens(0)).toBe(0);
-    expect(estimateContextTokens(1441)).toBe(361);
+    expect(estimateContextTokens(1441)).toBe(Math.ceil(1441 / CHARS_PER_TOKEN));
+    // Real usage ran 1.07x to 1.52x of chars/4: the estimate must not go back to the old divisor.
+    expect(estimateContextTokens(4000)).toBeGreaterThan(1000);
+  });
+
+  test("the dashboard price table matches the router's, so the two cannot drift", () => {
+    const dashboard: Record<string, { in: number; out: number }> = DASHBOARD_PRICES;
+    expect(Object.keys(dashboard).sort()).toEqual(Object.keys(PRICES).sort());
+    for (const alias of Object.keys(PRICES) as ModelAlias[]) {
+      expect(dashboard[alias]).toEqual({ in: PRICES[alias].input, out: PRICES[alias].output });
+    }
+    expect(DASHBOARD_CACHE_READ).toBe(CACHE_READ_MULTIPLIER);
+    expect(DASHBOARD_CACHE_WRITE).toBe(CACHE_WRITE_MULTIPLIER);
+  });
+});
+
+describe("recacheOnSameModel", () => {
+  test("prices a skip with no target model: read versus write on the model it sits on", () => {
+    const c = recacheOnSameModel(100_000, "opus");
+    expect(c.stay).toBeCloseTo(0.05, 10); // 100K at 0.1x of $5/Mtok
+    expect(c.switch).toBeCloseTo(1, 10); // 100K at 2x of $5/Mtok
+    expect(c.switch).toBeGreaterThan(c.stay);
   });
 });
 

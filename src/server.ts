@@ -2,7 +2,7 @@
 // and forwards everything else unchanged.
 
 import { join } from "node:path";
-import { DecisionCache } from "./cache.ts";
+import { LruCache } from "./cache.ts";
 import { classifyRequest, requestKind, type MessagesBody, type Turn } from "./conversation.ts";
 import { estimateContextTokens } from "./cost.ts";
 import { aliasOfModel, decide, isNoop, isOverridden, parseOverrides, requestedOf, type Decision, type RequestKind, type Requested } from "./decide.ts";
@@ -36,7 +36,11 @@ function parseJson(text: string): MessagesBody | null {
 }
 
 export function startServer(o: ServerOptions) {
-  const cache = new DecisionCache();
+  const cache = new LruCache<Decision>();
+  // Real prompt size (cache reads + cache writes + fresh input) from the last response of each turn. The API's
+  // own count, so it beats chars/4, but it arrives one turn late: a new turn is sized by the turn it follows,
+  // and the first turn of a conversation has nothing to go on and falls back to the estimate.
+  const observed = new LruCache<number>();
   const lastPath = join(o.stateDir, "last.json");
   const journalPath = join(o.stateDir, "decisions.jsonl");
   const safely = (what: string, p: Promise<void>) => p.catch((err) => o.log(`could not write ${what}: ${err}`));
@@ -76,7 +80,8 @@ export function startServer(o: ServerOptions) {
     if (!body || turn.kind === "passthrough") return forward(o.upstream, req, text);
 
     const requested = requestedOf(body);
-    const contextTokens = estimateContextTokens(text.length);
+    const measured = observed.get(turn.kind === "new" ? (turn.previousKey ?? "") : turn.key);
+    const contextTokens = measured ?? estimateContextTokens(text.length);
     let decision: Decision;
     let jev: JevResult | null = null;
     if (turn.kind === "continuation") {
@@ -116,7 +121,12 @@ export function startServer(o: ServerOptions) {
       requested,
       routed: { alias: decision.alias, model: decision.model, effort: decision.effort },
       context_tokens: contextTokens,
-      ...(decision.cost ? { stay_cost: decision.cost.stay, switch_cost: decision.cost.switch } : {}),
+      context_source: measured === null ? "estimated" : "measured",
+      ...(decision.cost
+        ? decision.cost.counterfactual
+          ? { stay_cost: decision.cost.stay, avoided_recache_cost: decision.cost.switch }
+          : { stay_cost: decision.cost.stay, switch_cost: decision.cost.switch }
+        : {}),
       jev: jev?.ok
         ? { ms: jev.ms, model: jev.answers.model!, effort: jev.answers.effort!, is_followup: decision.confidences.is_followup ?? 0 }
         : null,
@@ -125,7 +135,10 @@ export function startServer(o: ServerOptions) {
       upstream: { status: res.status, ms_to_headers: Math.round(performance.now() - started), retried_with_original: retried },
     };
     o.log(formatLine(record, decision));
-    return teeUsage(res, (usage) => void safely("decisions.jsonl", appendRecord(journalPath, { ...record, usage })));
+    return teeUsage(res, (usage) => {
+      if (usage) observed.set(turn.key, usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens);
+      void safely("decisions.jsonl", appendRecord(journalPath, { ...record, usage }));
+    });
   }
 
   return Bun.serve({

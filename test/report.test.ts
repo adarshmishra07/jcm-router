@@ -12,6 +12,7 @@ const rec = (over: Partial<DecisionRecord>): DecisionRecord => ({
   requested: { model: "claude-sonnet-5", effort: "low" },
   routed: { alias: "opus", model: "claude-opus-5", effort: "high" },
   context_tokens: 150,
+  context_source: "estimated",
   jev: { ms: 500, model: choice("opus", 0.8), effort: choice("high", 0.7), is_followup: 0 },
   prompt_preview: "refactor the auth middleware to support tenants",
   upstream: { status: 200, ms_to_headers: 900, retried_with_original: false },

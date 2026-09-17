@@ -1,7 +1,7 @@
 // Turns Jev answers, manual overrides, the previous decision and the scope policy into one concrete Decision.
 
 import type { JevAnswer, JevAnswers } from "./jev.ts";
-import { EFFORTS, MODELS, THRESHOLDS, guardSwitch, type Effort, type ModelAlias, type ScopePolicy, type SkipReason, type SwitchCost, type Target } from "./routing-policy.ts";
+import { EFFORTS, MODELS, THRESHOLDS, guardSwitch, skipCost, type Effort, type ModelAlias, type ScopePolicy, type SkipReason, type SwitchCost, type Target } from "./routing-policy.ts";
 
 export type DecisionSource = "jev" | "override" | "followup" | "fallback" | "cached" | "skipped";
 
@@ -88,7 +88,7 @@ export function decide(input: {
   const fromModel = previous ? previous.model : requested.model;
 
   const source: DecisionSource = isOverridden(overrides) ? "override" : followup ? "followup" : answers ? "jev" : "fallback";
-  const guard = input.skip ? { skip: input.skip } : source === "override" ? { skip: null } : guardSwitch({ kind: input.kind, contextTokens: input.contextTokens, from, to: { alias, effort }, policy: input.policy });
+  const guard = input.skip ? { skip: input.skip, cost: skipCost({ contextTokens: input.contextTokens, from }) } : source === "override" ? { skip: null } : guardSwitch({ kind: input.kind, contextTokens: input.contextTokens, from, to: { alias, effort }, policy: input.policy });
 
   const model = answers?.model;
   const jevEffortAnswer = answers?.effort;

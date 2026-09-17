@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { recacheOnSameModel } from "../src/cost.ts";
 import { decide, isNoop, parseOverrides, requestedOf, type Decision } from "../src/decide.ts";
 import type { JevAnswers } from "../src/jev.ts";
 import { THRESHOLDS } from "../src/routing-policy.ts";
@@ -113,7 +114,9 @@ describe("decide", () => {
   test("a pre-Jev skip keeps the cached model and effort, not the requested ones", () => {
     const d = decide({ ...base, previous, contextTokens: 400_000, skip: "context_too_large", answers: null, jevMs: null });
     expect(d).toMatchObject({ alias: "opus", model: "claude-opus-5", effort: "high", source: "skipped", skipReason: "context_too_large" });
-    expect("cost" in d).toBe(false);
+    // Jev was never asked, so there is no target model: the skip is priced as a re-cache on the model it sits on.
+    expect(d.cost).toEqual({ ...recacheOnSameModel(400_000, "opus"), counterfactual: true });
+    expect(d.cost!.switch).toBeGreaterThan(d.cost!.stay);
     const fresh = decide({ ...base, skip: "scope", answers: null, jevMs: null });
     expect(fresh).toMatchObject({ alias: "sonnet", model: "claude-sonnet-5", effort: "low", source: "skipped", skipReason: "scope" });
     expect(isNoop(fresh, requested)).toBe(true);
@@ -124,6 +127,8 @@ describe("decide", () => {
     expect(d).toMatchObject({ alias: "sonnet", effort: "low", source: "skipped", skipReason: "switch_not_worth_it" });
     expect(d.cost?.stay).toBeCloseTo(0.072, 6);
     expect(d.cost?.switch).toBeCloseTo(3.6, 6);
+    // Jev did pick a target here, so this is a real switch price, not the same-model counterfactual.
+    expect(d.cost?.counterfactual).toBeUndefined();
     expect(d.confidences.model).toBe(0.95);
   });
 

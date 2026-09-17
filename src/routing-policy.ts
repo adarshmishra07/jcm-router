@@ -1,7 +1,7 @@
 // Everything a human should review to tune routing lives in this file:
 // the model catalog, the Jev questions, the state Jev sees, the thresholds, and the scope rules.
 
-import { PRICES, switchPaysOff } from "./cost.ts";
+import { PRICES, recacheOnSameModel, switchPaysOff } from "./cost.ts";
 import type { RequestKind } from "./decide.ts";
 import type { JevQuestion } from "./jev.ts";
 
@@ -80,7 +80,10 @@ export function skipBeforeAsking(input: { kind: RequestKind | undefined; context
 }
 
 export type Target = { alias: ModelAlias | null; effort: Effort | null };
-export type SwitchCost = { stay: number; switch: number };
+// `switch` is what moving this context would cost. With `counterfactual`, no target model was ever chosen
+// (the skip happened before Jev was asked) and the figure is a re-cache on the current model: the floor under
+// any switch, not a switch that was priced against a real target.
+export type SwitchCost = { stay: number; switch: number; counterfactual?: true };
 
 // After a candidate is chosen. `from` is where the conversation's cache lives: the previous routed decision, or the
 // request if none is known. Upgrades with ROUTER_MAIN_UPGRADES deliberately spend more for quality.
@@ -98,6 +101,13 @@ export function guardSwitch(input: { kind: RequestKind | undefined; contextToken
   const tooLarge = input.contextTokens > THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS;
   const allowed = (upgrade && input.policy.mainUpgrades) || (!tooLarge && c.worth);
   return { skip: allowed ? null : "switch_not_worth_it", cost };
+}
+
+// A skip decided before Jev was asked still gets priced, so the log can show what the skip avoided. There is no
+// target model, so the counterfactual is a re-cache on the model the conversation already sits on.
+export function skipCost(input: { contextTokens: number; from: Target }): SwitchCost | undefined {
+  if (input.from.alias === null) return undefined; // unknown model, cannot be priced
+  return { ...recacheOnSameModel(input.contextTokens, input.from.alias), counterfactual: true };
 }
 
 export const LIMITS = {

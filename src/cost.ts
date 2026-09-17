@@ -26,10 +26,24 @@ export const PRICES: Record<ModelAlias, Price> = Object.fromEntries(
   ]),
 ) as Record<ModelAlias, Price>;
 
-// Rough token count of a request body. Used for every size check in the router.
-export const estimateContextTokens = (bodyChars: number): number => Math.ceil(bodyChars / 4);
+// Fallback token count of a request body, used only until the API has reported a real prompt size for the
+// conversation (see server.ts). Calibrated against the usage in ~/.claude-router/decisions.jsonl: over the 69
+// records whose body the API billed in full, real prompt tokens / (chars / 4) ran 1.07 to 1.52, token-weighted
+// 1.43, so a token is about 2.8 chars of Claude Code's JSON, not 4.
+// The other 47 records, all from one long session, measured 0.23x instead: once a body carries content the
+// server drops before billing (context_management edits, images), its size stops predicting the prompt at all,
+// by a factor no divisor can fix. That is why this is a first-turn fallback and not the router's token count.
+export const CHARS_PER_TOKEN = 2.8;
+export const estimateContextTokens = (bodyChars: number): number => Math.ceil(bodyChars / CHARS_PER_TOKEN);
 
 const usd = (tokens: number, pricePerMtok: number): number => (tokens * pricePerMtok) / MTOK;
+
+// What re-caching this context on the model it already sits on would cost. Used to price a skip that never
+// reached Jev: there is no target model, and staying put is the floor under any switch it might have made.
+export const recacheOnSameModel = (contextTokens: number, alias: ModelAlias): { stay: number; switch: number } => ({
+  stay: usd(contextTokens, PRICES[alias].cacheRead),
+  switch: usd(contextTokens, PRICES[alias].cacheWrite),
+});
 
 // Caches are scoped to the model. Staying reads the whole history from the cache on the current model; switching
 // writes it again on the target. Fresh input and output tokens are excluded: they are small next to the history

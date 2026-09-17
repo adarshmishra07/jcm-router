@@ -16,8 +16,14 @@ let rejectModels: string[] = [];
 let jevMode: "ok" | "down" = "ok";
 let jevAnswers = { model: "opus", modelConf: 0.9, effort: "high", effortConf: 0.9, followup: 0.0 };
 
+// The usage the fake API reports. The proxy takes input + cache_read + cache_creation of it as the measured
+// context size of this conversation's next turn, so tests can make a small body look like a big prompt.
+const DEFAULT_USAGE = { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 500, cache_creation_input_tokens: 0 };
+const OBSERVED = DEFAULT_USAGE.input_tokens + DEFAULT_USAGE.cache_read_input_tokens + DEFAULT_USAGE.cache_creation_input_tokens;
+let upstreamUsage = DEFAULT_USAGE;
+
 const sseFor = (model: string) =>
-  `event: message_start\ndata: {"type":"message_start","message":{"model":"${model}","usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":500,"cache_creation_input_tokens":0}}}\n\n` +
+  `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { model, usage: upstreamUsage } })}\n\n` +
   `event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"hi"}}\n\n` +
   `event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":42}}\n\n`;
 
@@ -92,6 +98,7 @@ beforeEach(() => {
   jevSeen.length = 0;
   logs.length = 0;
   rejectModels = [];
+  upstreamUsage = DEFAULT_USAGE;
   jevMode = "ok";
   jevAnswers = { model: "opus", modelConf: 0.9, effort: "high", effortConf: 0.9, followup: 0.0 };
 });
@@ -314,16 +321,42 @@ describe("proxy", () => {
     const record = (await journal()).at(-1)!;
     expect(record).toMatchObject({ turn: "new", source: "skipped", skip_reason: "context_too_large", routed: { alias: "sonnet", effort: "low" }, jev: null });
     expect(record.context_tokens).toBeGreaterThan(THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS);
-    expect(logs.at(-1)).toContain("skipped context_too_large");
+    expect(record.context_source).toBe("estimated");
+    // Jev was never asked, so there is no target model: the counterfactual is a re-cache on the model it stayed
+    // on, and it is named so it cannot be read as a switch that happened.
+    expect(record.avoided_recache_cost).toBeGreaterThan(record.stay_cost!);
+    expect(record.switch_cost).toBeUndefined();
+    expect(logs.at(-1)).toMatch(/skipped context_too_large stay \$\d+\.\d{3} recache \$\d+\.\d{3}/);
   });
 
-  test("once the context is large the conversation stays on the model it was routed to", async () => {
+  test("the first turn of a conversation is estimated, every turn after it is measured", async () => {
+    await post(proxy, mainBody("measure me"));
+    const first = (await journal()).at(-1)!;
+    expect(first).toMatchObject({ turn: "new", context_source: "estimated" });
+    expect(first.context_tokens).toBeGreaterThan(100);
+
+    await post(proxy, mainBody("measure me", [toolUse, toolResult()]));
+    expect((await journal()).at(-1)).toMatchObject({ turn: "continuation", context_source: "measured", context_tokens: OBSERVED });
+
+    const reply = { role: "assistant", content: [text("done")] };
+    await post(proxy, mainBody("measure me", [reply, { role: "user", content: [text("now the next bit")] }]));
+    expect((await journal()).at(-1)).toMatchObject({ turn: "new", context_source: "measured", context_tokens: OBSERVED });
+  });
+
+  test("once the measured context is large the conversation stays on the model it was routed to", async () => {
+    upstreamUsage = { ...DEFAULT_USAGE, cache_read_input_tokens: THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS + 1 };
     await post(proxy, mainBody("pinned chat"));
     expect(upstreamSeen[0]!.body?.model).toBe("claude-opus-5");
-    await post(proxy, largeBody("pinned chat", "and now a follow-up"));
+    await Bun.sleep(20); // the usage lands once the stream has drained
+
+    // The next body is small. Only the size the API reported says this conversation is past the gate.
+    const reply = { role: "assistant", content: [text("plan")] };
+    await post(proxy, mainBody("pinned chat", [reply, { role: "user", content: [text("and now a follow-up")] }]));
     expect(jevSeen).toHaveLength(1);
     expect(upstreamSeen[1]!.body).toMatchObject({ model: "claude-opus-5", output_config: { effort: "high" } });
     expect(await lastJson()).toMatchObject({ alias: "opus", effort: "high", source: "skipped", skipReason: "context_too_large" });
+    const record = (await journal()).at(-1)!;
+    expect(record).toMatchObject({ context_source: "measured", context_tokens: THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS + 11 });
   });
 
   test("ROUTER_SCOPE=subagents skips all main traffic and still routes subagents", async () => {

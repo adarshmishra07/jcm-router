@@ -21,9 +21,16 @@ export type DecisionRecord = {
   requested: { model: string; effort: Effort | null };
   routed: { alias: ModelAlias | null; model: string; effort: Effort | null };
   context_tokens: number;
-  // Present when the switch guard ran: what this turn costs staying on the cached model versus switching, in USD.
+  // "measured": the real prompt size the API reported for this conversation's previous request.
+  // "estimated": body chars / CHARS_PER_TOKEN, the only option on the first turn of a conversation.
+  context_source: "measured" | "estimated";
+  // What this turn costs staying on the cached model, in USD. Always present once the model is known.
   stay_cost?: number;
+  // What moving this context to the model Jev picked would have cost.
   switch_cost?: number;
+  // The same, for a skip that never reached Jev: no model was picked, so this is a re-cache on the current
+  // model, the floor under any switch. Never a switch that happened.
+  avoided_recache_cost?: number;
   jev: { ms: number; model: JevAnswer; effort: JevAnswer; is_followup: number } | null;
   jev_error?: string;
   prompt_preview?: string;
@@ -34,8 +41,11 @@ export type DecisionRecord = {
 const clock = (iso: string): string => iso.slice(11, 19);
 const oneLine = (s: string, max: number): string => JSON.stringify(s.replace(/\s+/g, " ").slice(0, max));
 const kTokens = (n: number): string => `${Math.round(n / 1000)}K`;
-const costs = (r: { stay_cost?: number; switch_cost?: number }): string =>
-  r.stay_cost !== undefined && r.switch_cost !== undefined ? ` stay $${r.stay_cost.toFixed(3)} switch $${r.switch_cost.toFixed(3)}` : "";
+const costs = (r: { stay_cost?: number; switch_cost?: number; avoided_recache_cost?: number }): string => {
+  const moved = r.switch_cost ?? r.avoided_recache_cost;
+  if (r.stay_cost === undefined || moved === undefined) return "";
+  return ` stay $${r.stay_cost.toFixed(3)} ${r.switch_cost !== undefined ? "switch" : "recache"} $${moved.toFixed(3)}`;
+};
 
 export function formatLine(r: Omit<DecisionRecord, "usage">, decision: Decision): string {
   const target = `${r.routed.alias ?? r.routed.model}/${r.routed.effort ?? "default"}`;
