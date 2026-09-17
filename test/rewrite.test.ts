@@ -95,3 +95,21 @@ describe("withoutThinkingEdits", () => {
     expect(withoutThinkingEdits({ other: 1 })).toEqual({ other: 1 });
   });
 });
+
+import { withoutLongContextBeta } from "../src/proxy.ts";
+
+describe("withoutLongContextBeta", () => {
+  test("drops only the context-1m beta and keeps the rest", () => {
+    const h = new Headers({ "anthropic-beta": "oauth-2025-04-20, context-1m-2025-08-07,effort-2025-11-24" });
+    expect(withoutLongContextBeta(h).get("anthropic-beta")).toBe("oauth-2025-04-20,effort-2025-11-24");
+  });
+  test("removes the header when nothing is left, leaves other headers alone", () => {
+    const h = new Headers({ "anthropic-beta": "context-1m-2025-08-07", authorization: "Bearer x" });
+    const out = withoutLongContextBeta(h);
+    expect(out.get("anthropic-beta")).toBeNull();
+    expect(out.get("authorization")).toBe("Bearer x");
+  });
+  test("no beta header is a no-op", () => {
+    expect(withoutLongContextBeta(new Headers()).get("anthropic-beta")).toBeNull();
+  });
+});

@@ -11,11 +11,24 @@ function without(headers: Headers, names: string[]): Headers {
   return next;
 }
 
-export async function forward(upstream: string, req: Request, body: string | undefined): Promise<Response> {
+// Betas that only 1M-context models accept. Haiku 4.5 (200K) returns 400 if Claude Code's header carries one.
+const LONG_CONTEXT_BETA = /^context-1m-/;
+
+export function withoutLongContextBeta(headers: Headers): Headers {
+  const beta = headers.get("anthropic-beta");
+  if (!beta) return headers;
+  const kept = beta.split(",").map((b) => b.trim()).filter((b) => b && !LONG_CONTEXT_BETA.test(b));
+  const next = new Headers(headers);
+  if (kept.length > 0) next.set("anthropic-beta", kept.join(","));
+  else next.delete("anthropic-beta");
+  return next;
+}
+
+export async function forward(upstream: string, req: Request, body: string | undefined, headers: Headers = req.headers): Promise<Response> {
   const url = new URL(req.url);
   const res = await fetch(upstream + url.pathname + url.search, {
     method: req.method,
-    headers: without(req.headers, DROP_REQUEST_HEADERS),
+    headers: without(headers, DROP_REQUEST_HEADERS),
     body: body === "" ? undefined : body,
   });
   return new Response(res.body, { status: res.status, headers: without(res.headers, DROP_RESPONSE_HEADERS) });

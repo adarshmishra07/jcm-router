@@ -7,9 +7,9 @@ import { classifyRequest, requestKind, type MessagesBody, type Turn } from "./co
 import { aliasOfModel, decide, isNoop, parseOverrides, requestedOf, type Decision, type RequestKind, type Requested } from "./decide.ts";
 import { appendRecord, formatLine, writeLastDecision, PROMPT_PREVIEW_CHARS, type DecisionRecord } from "./decision-log.ts";
 import { askJev, type JevClient, type JevResult } from "./jev.ts";
-import { forward, isRewriteRejection } from "./proxy.ts";
+import { forward, isRewriteRejection, withoutLongContextBeta } from "./proxy.ts";
 import { applyDecision } from "./rewrite.ts";
-import { QUESTIONS, buildState } from "./routing-policy.ts";
+import { MODELS, QUESTIONS, buildState } from "./routing-policy.ts";
 import { teeUsage } from "./usage.ts";
 
 export type ServerOptions = {
@@ -84,7 +84,9 @@ export function startServer(o: ServerOptions) {
 
     const rewrite = !o.dryRun && !isNoop(decision, requested);
     const started = performance.now();
-    let res = await forward(o.upstream, req, rewrite ? JSON.stringify(applyDecision(body, decision)) : text);
+    const smallContext = decision.alias !== null && !MODELS[decision.alias].supportsEffort;
+    const headers = rewrite && smallContext ? withoutLongContextBeta(req.headers) : req.headers;
+    let res = await forward(o.upstream, req, rewrite ? JSON.stringify(applyDecision(body, decision)) : text, headers);
     let retried = false;
     if (rewrite && isRewriteRejection(res.status)) {
       const reason = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
