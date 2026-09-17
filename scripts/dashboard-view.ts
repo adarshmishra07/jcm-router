@@ -20,6 +20,8 @@ export type DashboardData = {
   rows?: Array<Record<string, string | number | null | undefined>>;
   // Counterfactual, never netted into the spend above: re-caching that skipped switches avoided.
   avoided?: { skips?: number; tokens?: number; usd?: number };
+  // From the proxy's /healthz. Null when the proxy did not answer, which is not the same as passthrough.
+  health?: { mode?: string; restarts?: number; last_crash?: { code?: number; at?: string } | null } | null;
   jev?: {
     count?: number;
     p50?: number;
@@ -58,6 +60,19 @@ function render(input: unknown): string {
   const pct = (v: unknown): string => Math.round(num(v) * 100) + "%";
   const model = (v: unknown): string => str(v).replace(/^claude-/, "");
 
+  // Routing being off is the one thing on this page that is not about money, so it goes above everything and
+  // says so in words: the numbers below stop moving and nobody would otherwise know why.
+  const h = d.health && typeof d.health === "object" ? d.health : null;
+  const crash = h && h.last_crash && typeof h.last_crash === "object" ? h.last_crash : null;
+  const banner =
+    h && h.mode === "passthrough"
+      ? '<section class="alert" role="alert"><p class="alert-title"><span class="mark" aria-hidden="true">!</span>Passthrough mode: routing is off</p>' +
+        '<p class="sub">The proxy could not keep the router running, so it is forwarding every request to the API unchanged. ' +
+        "Claude Code keeps working, nothing is being routed, and no new decisions will appear below." +
+        (crash ? " Last exit code " + int(crash.code) + " at " + esc(str(crash.at).slice(11, 19)) + " UTC." : "") +
+        " Restarts so far: " + int(h.restarts) + ". The proxy keeps retrying the router.</p></section>"
+      : "";
+
   const v = d.verdict ?? {};
   const all = v.overall ?? {};
   const records = num(d.records) || num(all.requests);
@@ -67,6 +82,7 @@ function render(input: unknown): string {
 
   if (records === 0) {
     return (
+      banner +
       '<section class="hero flat"><p class="lede">No decisions yet.</p>' +
       "<p class=\"sub\">This page reads the router's log and refreshes itself every 5 seconds. Nothing has been routed so far.</p>" +
       '<ol class="steps"><li>Start the proxy: <code>bun run up</code></li>' +
@@ -170,7 +186,7 @@ function render(input: unknown): string {
       : '<p class="hint">Nothing routed yet.</p>') +
     "</section>";
 
-  return hero + '<div class="cols">' + cacheSection + jevSection + "</div>" + decisions;
+  return banner + hero + '<div class="cols">' + cacheSection + jevSection + "</div>" + decisions;
 }
 
 const CSS = `
@@ -197,6 +213,9 @@ h2{font-size:15px;font-weight:600;margin:0 0 2px}
 .hero.under{border-color:var(--good);background:var(--goodbg)}
 .hero.over{border-color:var(--bad);background:var(--badbg)}
 .hero.flat{border-color:var(--mute)}
+.alert{margin:16px 0 0;padding:14px 16px;border:2px solid var(--bad);border-radius:4px;background:var(--badbg)}
+.alert-title{margin:0 0 4px;font-size:17px;font-weight:700;color:var(--bad);letter-spacing:-.01em}
+.alert .sub{font-size:14px;margin:0;max-width:75ch}
 .lede{font-size:clamp(34px,7vw,64px);font-weight:700;letter-spacing:-.025em;line-height:1.05;margin:0 0 10px;font-variant-numeric:lining-nums}
 .hero.under .lede{color:var(--good)}.hero.over .lede{color:var(--bad)}
 .mark{display:inline-block;width:.85em;font-weight:500}

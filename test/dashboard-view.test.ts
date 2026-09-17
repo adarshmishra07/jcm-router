@@ -67,6 +67,23 @@ describe("renderPage", () => {
     expect('<div id="main">' + render(f.losing!) + "</div>").toBe(body(html).replace(/<\/div><\/main>\n$/, "</div>"));
   });
 
+  test("passthrough says routing is off in words, not only in colour", () => {
+    const html = body(renderPage({ ...f.saving!, health: { mode: "passthrough", restarts: 3, last_crash: { code: 1, at: "2026-09-17T08:00:00.000Z" } } }));
+    expect(html).toContain("Passthrough mode: routing is off");
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Last exit code 1 at 08:00:00");
+    expect(html).toContain("Restarts so far: 3");
+    // Above the verdict, so it is read first.
+    expect(html.indexOf("Passthrough mode")).toBeLessThan(html.indexOf("Saving $35.07"));
+  });
+
+  test("the banner shows on the empty page too, and never when routing is on or health is unknown", () => {
+    expect(body(renderPage({ ...f.empty!, health: { mode: "passthrough", restarts: 1, last_crash: null } }))).toContain("Passthrough mode");
+    expect(body(renderPage({ ...f.saving!, health: { mode: "routing", restarts: 0, last_crash: null } }))).not.toContain("Passthrough");
+    expect(body(renderPage({ ...f.saving!, health: null }))).not.toContain("Passthrough");
+    expect(body(renderPage(f.saving!))).not.toContain("Passthrough");
+  });
+
   test("no em dashes, no CDN, no external assets", () => {
     const html = renderPage(f.saving!);
     expect(html).not.toContain(String.fromCharCode(0x2014));

@@ -4,10 +4,13 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { describeEnv } from "../src/env.ts";
+import { HEALTH_PATH, type Health } from "../src/health.ts";
 import { avoidedCost, type LogRecord, parseJournal, recordCost } from "./cost.ts";
 import { renderPage } from "./dashboard-view.ts";
 
 export const DEFAULT_PORT = 8788;
+const HEALTH_TIMEOUT_MS = 500;
 const RECENT = 100;
 const PREVIEW = 90;
 const CONFIDENCE_BUCKETS = [0.5, 0.7, 0.9] as const;
@@ -24,6 +27,8 @@ export type Summary = {
   verdict: { overall: Totals; main: Totals; subagent: Totals };
   // Counterfactual, kept apart from the measured spend in `verdict` on purpose: no request was made.
   avoided: Avoided;
+  // The proxy's own answer, or null when it did not give one. Null means "not running", not "passthrough".
+  health: Health | null;
   cache: { byModel: Row[]; switches: number; recaches: number; recached_tokens: number };
   rows: Row[];
   jev: {
@@ -142,11 +147,12 @@ function recentRows(records: LogRecord[]): Row[] {
     });
 }
 
-export function summarize(records: LogRecord[], log = ""): Summary {
+export function summarize(records: LogRecord[], log = "", health: Health | null = null): Summary {
   const byKind = group(records, kindOf);
   return {
     generated_at: new Date().toISOString(),
     log,
+    health,
     records: records.length,
     unpriced: records.filter((r) => !recordCost(r).priced).length,
     verdict: {
@@ -163,19 +169,31 @@ export function summarize(records: LogRecord[], log = ""): Summary {
 
 export const logPath = (): string => join(process.env.ROUTER_STATE_DIR || join(homedir(), ".claude-router"), "decisions.jsonl");
 
-export async function readSummary(path: string): Promise<Summary> {
-  const file = Bun.file(path);
-  const text = (await file.exists()) ? await file.text() : "";
-  return summarize(parseJournal(text), path);
+// The dashboard is a separate process from the proxy, so /healthz is the only way it can tell whether routing
+// is still on. No answer at all means the proxy is not running, which is not the same thing as passthrough.
+export async function fetchHealth(port: number | null): Promise<Health | null> {
+  if (port === null) return null;
+  try {
+    const res = await fetch(`http://localhost:${port}${HEALTH_PATH}`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+    return res.ok ? ((await res.json()) as Health) : null;
+  } catch {
+    return null;
+  }
 }
 
-export const handler = (path: string) => async (req: Request): Promise<Response> => {
+export async function readSummary(path: string, proxyPort: number | null = null): Promise<Summary> {
+  const file = Bun.file(path);
+  const text = (await file.exists()) ? await file.text() : "";
+  return summarize(parseJournal(text), path, await fetchHealth(proxyPort));
+}
+
+export const handler = (path: string, proxyPort: number | null = null) => async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   if (url.pathname === "/api.json") {
-    return Response.json(await readSummary(path), { headers: { "cache-control": "no-store" } });
+    return Response.json(await readSummary(path, proxyPort), { headers: { "cache-control": "no-store" } });
   }
   if (url.pathname === "/") {
-    const summary = await readSummary(path);
+    const summary = await readSummary(path, proxyPort);
     // ?share=1 blanks the prompt previews so a screenshot can be posted publicly.
     const shown = url.searchParams.get("share") === "1"
       ? { ...summary, rows: summary.rows?.map((r) => ({ ...r, prompt: "" })) }
@@ -193,6 +211,6 @@ if (import.meta.main) {
     process.exit(1);
   }
   const path = logPath();
-  const server = Bun.serve({ port, fetch: handler(path) });
+  const server = Bun.serve({ port, fetch: handler(path, describeEnv(process.env).port) });
   console.log(`dashboard on http://localhost:${server.port} reading ${path}`);
 }
