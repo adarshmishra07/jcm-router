@@ -17,6 +17,10 @@ scripts/env-off.sh    # back to calling the API directly
 start if either port is taken. `bun start` (proxy only) and `bun run dashboard` still work on
 their own. Ports: `PORT` for the proxy (default 8787), `--port` for the dashboard (default 8788).
 
+Both `bun run up` and `bun start` run the proxy under `scripts/supervise.ts`, which restarts it and, if it
+will not stay up, forwards requests unchanged instead so Claude Code keeps working. The README section
+[Staying up](../README.md#staying-up) has the behaviour, the log lines and `/healthz`.
+
 `env-on.sh` backs up `~/.claude/settings.json` into `~/.claude-router/backup/` and then sets
 exactly one key, `env.ANTHROPIC_BASE_URL`. `env-off.sh` removes that one key (and drops `env`
 if it becomes empty). Both validate the rewritten JSON before replacing the file, both are safe
@@ -27,6 +31,45 @@ The state directory is `~/.claude-router` (the `ROUTER_STATE_DIR` default), stil
 before the project was renamed to jcm-router.
 
 Claude Code reads settings at startup, so restart it after either script.
+
+### Surviving reboots (launchd)
+
+The supervisor keeps the router up. Nothing keeps the supervisor up across a reboot, a `kill -9` on it, or a
+laptop going to sleep. On macOS that job belongs to launchd. The following is an example for you to install
+yourself, not something this project installs or writes: save it, change the two paths, load it.
+
+`~/Library/LaunchAgents/ai.jcm-router.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.jcm-router</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/bun</string>
+    <string>run</string>
+    <string>start</string>
+  </array>
+  <key>WorkingDirectory</key><string>/absolute/path/to/jcm-router</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/jcm-router.log</string>
+  <key>StandardErrorPath</key><string>/tmp/jcm-router.log</string>
+</dict>
+</plist>
+```
+
+```sh
+launchctl load -w ~/Library/LaunchAgents/ai.jcm-router.plist     # start now, and at every login
+curl -s localhost:8787/healthz                                   # check it came up
+launchctl unload -w ~/Library/LaunchAgents/ai.jcm-router.plist   # stop it for good
+```
+
+Two things to know. A launchd agent does not see your shell environment, so `TYPESAFE_API_KEY` has to come
+from the `.env` file in `WorkingDirectory` (which `bun run` loads). And this runs the proxy only: start the
+dashboard with `bun run dashboard` when you want it.
 
 ## Dashboard
 
@@ -69,12 +112,12 @@ the router paying for its own switches.
 **Decisions table.** The last 100 requests, newest first. A red row cost more than the baseline,
 a green row less. `source` says how the decision was made (`jev`, `override`, `followup`,
 `fallback`, `cached`, `dry_run`, or `skipped: <reason>` when the router decided a switch was not
-worth the cache loss). `confidence` is Jev's confidence in the model choice; below 0.5 the router
-keeps whatever Claude Code asked for.
+worth the cache loss). `confidence` is Jev's confidence in the model choice; below `MODEL_MIN_CONFIDENCE`
+(0.7) the router keeps whatever Claude Code asked for.
 
 **Jev health.** Call count, p50 and p95 latency (this is added to every new message's time to
 first token), errors grouped by reason with how many caused a fallback, and the distribution of
-model-choice confidence. If most calls land under 0.5, the router is mostly a no-op.
+model-choice confidence. If most calls land under 0.7, the router is mostly a no-op.
 
 ## Eval harness
 
@@ -95,10 +138,9 @@ the eval measures a router you are not running.
 
 The prompt set is labeled by tier: `trivial` (should land on haiku), `normal` (sonnet), `hard`
 (opus or fable). Follow-up cases are scored differently: they pass when Jev's `is_followup`
-signal is at or above the harness's own `FOLLOWUP_MIN_NOUL` (currently 0.7, while the router runs at
-0.55, so the harness is the stricter of the two), because a follow-up reuses the previous decision
-instead of being
-re-classified.
+signal is at or above the harness's own `FOLLOWUP_MIN_NOUL` (0.55), which a test holds equal to
+`THRESHOLDS.FOLLOWUP_MIN_NOUL` in the router, because a follow-up reuses the previous decision
+instead of being re-classified.
 
 - **`MODEL_MIN_CONFIDENCE`.** Compare mean confidence on hits versus misses. If hits average 0.9
   and misses 0.4, a threshold around 0.6 discards most mistakes and keeps most wins. If the two

@@ -65,7 +65,9 @@ jcm-router is up
 ```
 
 That runs the proxy and the dashboard together and refuses to start if either port is taken
-(`PORT` for the proxy, `--port` for the dashboard). `bun start` runs the proxy on its own.
+(`PORT` for the proxy, `--port` for the dashboard). `bun start` runs the proxy on its own. Both run the proxy
+under a supervisor that restarts it, and falls back to plain forwarding if it will not stay up: see
+[Staying up](#staying-up).
 
 Then point Claude Code at the proxy, in a second terminal:
 
@@ -90,13 +92,72 @@ scripts/env-off.sh        # removes that one key from settings.json
 # then restart Claude Code, and ctrl-c the proxy
 ```
 
-> **The proxy must be running.** While `ANTHROPIC_BASE_URL` points at localhost and nothing is
-> listening there, Claude Code cannot reach the API at all: every request fails, not just the routed
-> ones. If Claude Code suddenly cannot connect, either start the proxy again (`bun run up`) or run
-> `scripts/env-off.sh` and restart Claude Code.
+> **Something must be listening on that port.** While `ANTHROPIC_BASE_URL` points at localhost and
+> nothing answers there, Claude Code cannot reach the API at all: every request fails, not just the
+> routed ones. That is what [Staying up](#staying-up) is about, and why `env-on.sh` refuses to run
+> when the proxy is not up. If Claude Code suddenly cannot connect, either start the proxy again
+> (`bun run up`) or run `scripts/env-off.sh` and restart Claude Code.
 >
 > Note the precedence: `env.ANTHROPIC_BASE_URL` in `~/.claude/settings.json` **overrides** the shell
 > variable, so unsetting it in your shell does not undo `env-on.sh`. Use `env-off.sh`.
+
+## Staying up
+
+`ANTHROPIC_BASE_URL` sends Claude Code to localhost and Claude Code has nowhere else to go, so the process
+that runs the router is a supervisor, [`scripts/supervise.ts`](scripts/supervise.ts). Both `bun run up` and
+`bun start` go through it.
+
+**Respawn.** A router that exits non-zero is restarted, backing off from 200ms, doubling to 5s, reset after a
+minute of staying up. Every restart is logged with the exit code and how long the process ran:
+
+```
+router exited with code 137 after 2028ms, restart 1 in 200ms
+```
+
+**Passthrough.** Three crashes inside 60 seconds and the supervisor stops trying to route. It binds the port
+itself and streams every request to `ANTHROPIC_UPSTREAM` unchanged: no Jev, no body rewriting, no journal, the
+same header handling the real proxy uses. Claude Code keeps working, routing is off, and the log is blunt
+about it:
+
+```
+PASSTHROUGH MODE: ROUTING IS OFF. The router crashed 3 times in 60s (last exit code 1). Port 8787 now
+forwards every request to https://api.anthropic.com unchanged, so Claude Code keeps working. Retrying
+the router every 60s.
+```
+
+It tries the router again every 60 seconds and goes back to routing as soon as one starts and stays up for 3
+seconds (`RECOVERED: ...` in the log). The port is unbound during those few seconds of each retry, which is
+the one hole here: a request landing exactly then is refused, and Claude Code retries it.
+
+**`GET /healthz`** answers on the proxy port in both modes, with no auth, and never calls upstream:
+
+```json
+{ "mode": "routing", "uptime_s": 41.2, "restarts": 1,
+  "last_crash": { "at": "2026-09-17T08:47:28.652Z", "code": 137, "ran_ms": 2028 },
+  "jev_key": true,
+  "profile": { "port": 8787, "upstream": "https://api.anthropic.com", "scope": "all", "upgrades": "off",
+               "main_upgrades": false, "dry_run": false, "log_prompts": true } }
+```
+
+`jev_key` is a boolean and only ever a boolean. Two things read this: `scripts/env-on.sh` refuses to point
+Claude Code at a port that does not answer it, and the dashboard shows a banner whenever the mode is
+`passthrough`.
+
+### What the supervisor deliberately does not do
+
+**It never edits `~/.claude/settings.json`,** on a crash or on the way out. Claude Code reads that file at
+session start, so rewriting it mid-crash would not rescue the session that is already running, and a process
+that edits your global config while it is dying is worse than the problem it is trying to solve. The port
+answering at all times is the fix.
+
+### What it does not cover
+
+A hard kill of the supervisor itself (`kill -9` on the supervisor, not on the router), a reboot, or the
+machine going to sleep. Nothing is listening after any of those and the recovery is manual: start the proxy
+again, or run `scripts/env-off.sh` and restart Claude Code. If you want it to survive those, run it under
+launchd. There is a ready-to-paste plist in
+[docs/dashboard.md](docs/dashboard.md#surviving-reboots-launchd), for you to install yourself: this repo
+installs nothing.
 
 ## How routing decides
 
@@ -114,8 +175,12 @@ all defined in [`src/routing-policy.ts`](src/routing-policy.ts), which is the wh
 | `effort` | choice | low, medium, high, xhigh or max, by how much deliberation the task needs |
 | `is_followup` | yes/no probability | is this a short continuation ("yes do it", "continue") that only makes sense given the previous reply? |
 
-**Confidence gates.** Below `MODEL_MIN_CONFIDENCE` (0.5) the model Claude Code asked for is kept.
-`effort` is gated separately at `EFFORT_MIN_CONFIDENCE` (0.5).
+**Confidence gates.** Below `MODEL_MIN_CONFIDENCE` (0.7) the model Claude Code asked for is kept.
+`effort` is gated separately at `EFFORT_MIN_CONFIDENCE` (0.7). Both sat at 0.5 until the eval sweep showed
+every model choice Jev acted on was correct at every floor from 0.4 to 0.9, so the bar was raised to a value
+that costs no measured savings rather than to fix errors. `bun run tune` on real traffic since then puts the
+money-optimal floor at 0.65 and reads 0.70 as just outside what the eval supports, but that gap rests on four
+decisions, so 0.70 stands.
 
 **Follow-ups.** At or above `FOLLOWUP_MIN_NOUL` (0.55), the previous turn's decision is reused. "Yes
 do it" after an Opus plan stays on Opus.
@@ -265,8 +330,9 @@ If `bun` is not on the PATH Claude Code runs commands with, use the absolute pat
 
 - **Your subscription plan must include the models being routed to.** If it does not, the request
   comes back 4xx and the fallback puts the original model back.
-- **Nothing works if the proxy is not running.** See the warning above, and `scripts/env-off.sh` for
-  the way out.
+- **Nothing works if nothing is listening on the proxy port.** The supervisor covers the router
+  crashing, including by giving up on routing and forwarding instead. It does not cover itself being
+  killed, a reboot or a sleep. See [Staying up](#staying-up), and `scripts/env-off.sh` for the way out.
 - **`env.ANTHROPIC_BASE_URL` in `~/.claude/settings.json` overrides the shell variable.** Unsetting
   it in your shell will not undo `env-on.sh`.
 - **Decisions are held in memory and lost when the proxy restarts.** A tool loop in flight then
