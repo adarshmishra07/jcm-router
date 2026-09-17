@@ -64,6 +64,7 @@ let proxy: ReturnType<typeof startServer>;
 let dryProxy: ReturnType<typeof startServer>;
 let subagentsProxy: ReturnType<typeof startServer>;
 let upgradesProxy: ReturnType<typeof startServer>;
+let noUpgradesProxy: ReturnType<typeof startServer>;
 const logs: string[] = [];
 
 beforeAll(async () => {
@@ -74,13 +75,15 @@ beforeAll(async () => {
     jev: { url: `http://localhost:${jev.port}/v1/systemone`, apiKey: "apikey_test", timeoutMs: 1000 },
     logPrompts: true,
     stateDir,
-    policy: { scope: "all" as const, mainUpgrades: false },
+    policy: { scope: "all" as const, mainUpgrades: false, upgrades: "on" as const },
     log: (l: string) => logs.push(l),
   };
   proxy = startServer({ ...base, dryRun: false });
   dryProxy = startServer({ ...base, dryRun: true, stateDir: join(stateDir, "dry") });
-  subagentsProxy = startServer({ ...base, dryRun: false, stateDir: join(stateDir, "sub"), policy: { scope: "subagents", mainUpgrades: false } });
-  upgradesProxy = startServer({ ...base, dryRun: false, stateDir: join(stateDir, "up"), policy: { scope: "all", mainUpgrades: true } });
+  subagentsProxy = startServer({ ...base, dryRun: false, stateDir: join(stateDir, "sub"), policy: { scope: "subagents", mainUpgrades: false, upgrades: "on" } });
+  upgradesProxy = startServer({ ...base, dryRun: false, stateDir: join(stateDir, "up"), policy: { scope: "all", mainUpgrades: true, upgrades: "on" } });
+  // The default ROUTER_UPGRADES, paired with ROUTER_MAIN_UPGRADES=1 to show the former wins.
+  noUpgradesProxy = startServer({ ...base, dryRun: false, stateDir: join(stateDir, "noup"), policy: { scope: "all", mainUpgrades: true, upgrades: "off" } });
 });
 
 afterAll(async () => {
@@ -88,6 +91,7 @@ afterAll(async () => {
   dryProxy.stop(true);
   subagentsProxy.stop(true);
   upgradesProxy.stop(true);
+  noUpgradesProxy.stop(true);
   upstream.stop(true);
   jev.stop(true);
   await rm(stateDir, { recursive: true, force: true });
@@ -389,6 +393,32 @@ describe("proxy", () => {
     expect(down).toMatchObject({ source: "skipped", skip_reason: "switch_not_worth_it", routed: { alias: "sonnet", effort: "low" }, jev: { model: { choice: "haiku" } } });
     expect(down.stay_cost).toBeLessThan(down.switch_cost!);
     expect(logs.at(-1)).toMatch(/skipped switch_not_worth_it stay \$\d+\.\d{3} switch \$\d+\.\d{3}/);
+  });
+
+  test("ROUTER_UPGRADES=off forwards a blocked upgrade unchanged and journals why; downgrades still route", async () => {
+    const body = subagentBody("find the race condition");
+    await post(noUpgradesProxy, body);
+    expect(jevSeen).toHaveLength(1);
+    expect(upstreamSeen[0]!.text).toBe(JSON.stringify(body));
+    expect(await lastJson(join(stateDir, "noup"))).toMatchObject({ kind: "subagent", alias: "sonnet", effort: "low", source: "skipped", skipReason: "upgrade_blocked" });
+    const record = (await journal(join(stateDir, "noup"))).at(-1)!;
+    expect(record).toMatchObject({ kind: "subagent", source: "skipped", skip_reason: "upgrade_blocked", routed: { alias: "sonnet", effort: "low" }, jev: { model: { choice: "opus" } } });
+    expect(logs.at(-1)).toContain("skipped upgrade_blocked");
+
+    jevAnswers = { ...jevAnswers, model: "haiku" };
+    await post(noUpgradesProxy, subagentBody("what is 17*23"));
+    expect(upstreamSeen[1]!.body?.model).toBe("claude-haiku-4-5");
+  });
+
+  test("ROUTER_UPGRADES=off beats ROUTER_MAIN_UPGRADES=1: a large main context never reaches Jev", async () => {
+    await post(noUpgradesProxy, largeBody("hard chat", "find the race condition"));
+    expect(jevSeen).toHaveLength(0);
+    expect(upstreamSeen[0]!.body?.model).toBe("claude-sonnet-5");
+    expect((await journal(join(stateDir, "noup"))).at(-1)).toMatchObject({ source: "skipped", skip_reason: "context_too_large" });
+    // An explicit human instruction still upgrades.
+    await post(noUpgradesProxy, mainBody("!opus fix the flaky test"));
+    expect(upstreamSeen[1]!.body?.model).toBe("claude-opus-5");
+    expect(await lastJson(join(stateDir, "noup"))).toMatchObject({ alias: "opus", source: "override" });
   });
 
   test("overrides win over every guard, including on a large main context", async () => {

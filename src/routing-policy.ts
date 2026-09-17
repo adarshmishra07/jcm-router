@@ -57,6 +57,8 @@ export const THRESHOLDS = {
   MAIN_MAX_CONTEXT_TOKENS: 100_000,
   // Main chat only. A switch may cost at most this much more than staying, this turn (see cost.ts).
   MAIN_MAX_SWITCH_COST_USD: 0.25,
+  // ROUTER_UPGRADES=confident only. Jev's model confidence must reach this for an upgrade to go through.
+  UPGRADE_MIN_CONFIDENCE: 0.8,
 } as const;
 
 // Scope: where routing is allowed to change the model.
@@ -67,19 +69,58 @@ export const THRESHOLDS = {
 // without a cache miss via a system message with empty content; effort-only changes would then skip the guard.
 export const ROUTER_SCOPES = ["subagents", "all"] as const;
 export type RouterScope = (typeof ROUTER_SCOPES)[number];
-export type ScopePolicy = { scope: RouterScope; mainUpgrades: boolean };
-export type SkipReason = "scope" | "context_too_large" | "switch_not_worth_it";
+
+// Upgrades: may Jev ever send a request to something pricier than it asked for? Measured on 427 real requests,
+// downgrades saved $22.67 and upgrades cost $13.36 extra, so the default is never. The claim is "saves or does
+// nothing", not "sometimes costs more".
+//   off        never (default). Downgrades and same-price picks only.
+//   confident  only to fable or opus, and only at or above UPGRADE_MIN_CONFIDENCE.
+//   on         any Jev pick is honoured.
+// ROUTER_UPGRADES=off beats ROUTER_MAIN_UPGRADES=1: that flag only lets a large main chat reach Jev for an upgrade,
+// and with no upgrades allowed anywhere there is nothing to reach it for, so the context gate applies as normal.
+// Manual overrides ("!opus") always win: a human instruction is not a routing mistake.
+export const UPGRADE_POLICIES = ["off", "confident", "on"] as const;
+export type UpgradePolicy = (typeof UPGRADE_POLICIES)[number];
+const UPGRADE_TIERS: readonly ModelAlias[] = ["fable", "opus"];
+
+export type ScopePolicy = { scope: RouterScope; mainUpgrades: boolean; upgrades: UpgradePolicy };
+export type SkipReason = "scope" | "context_too_large" | "switch_not_worth_it" | "upgrade_blocked";
+
+const mayUpgradeMain = (policy: ScopePolicy): boolean => policy.mainUpgrades && policy.upgrades !== "off";
 
 // Before Jev is called. A skip here means no Jev latency and no Jev spend. Overrides bypass every guard.
 export function skipBeforeAsking(input: { kind: RequestKind | undefined; contextTokens: number; overridden: boolean; policy: ScopePolicy }): SkipReason | null {
   if (input.overridden || input.kind === "subagent") return null;
   if (input.policy.scope === "subagents") return "scope";
   // With ROUTER_MAIN_UPGRADES Jev is still asked, so a confident upgrade can go through guardSwitch.
-  if (input.contextTokens > THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS && !input.policy.mainUpgrades) return "context_too_large";
+  if (input.contextTokens > THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS && !mayUpgradeMain(input.policy)) return "context_too_large";
   return null;
 }
 
 export type Target = { alias: ModelAlias | null; effort: Effort | null };
+
+const EFFORT_ORDER = Object.keys(EFFORTS) as Effort[];
+
+// Is `to` a bigger spend than what the request asked for? A pricier model is. So is more effort on the same model:
+// a judgement call, since effort is not on the price list, but more thinking is more output tokens, and the
+// point of `off` is a ceiling on spend. A null effort (no output_config, 1 in 686 logged requests) cannot be
+// compared and is left alone.
+export function isUpgrade(requested: Target, to: Target): boolean {
+  if (requested.alias === null || to.alias === null) return false;
+  const price = PRICES[to.alias].input - PRICES[requested.alias].input;
+  if (price !== 0) return price > 0;
+  return requested.effort !== null && to.effort !== null && EFFORT_ORDER.indexOf(to.effort) > EFFORT_ORDER.indexOf(requested.effort);
+}
+
+// Applied to fresh Jev picks only. An override is a human instruction, a follow-up reuses a decision that already
+// passed, a fallback is the request itself. Blocked picks are journalled as skipped/upgrade_blocked.
+export function blocksUpgrade(input: { requested: Target; to: Target; confidence: number | undefined; policy: ScopePolicy }): boolean {
+  if (!isUpgrade(input.requested, input.to)) return false;
+  const { upgrades } = input.policy;
+  if (upgrades === "on") return false;
+  if (upgrades === "off") return true;
+  return (input.confidence ?? 0) < THRESHOLDS.UPGRADE_MIN_CONFIDENCE || input.to.alias === null || !UPGRADE_TIERS.includes(input.to.alias);
+}
 // `switch` is what moving this context would cost. With `counterfactual`, no target model was ever chosen
 // (the skip happened before Jev was asked) and the figure is a re-cache on the current model: the floor under
 // any switch, not a switch that was priced against a real target.

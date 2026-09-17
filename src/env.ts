@@ -2,7 +2,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ROUTER_SCOPES, type RouterScope } from "./routing-policy.ts";
+import { ROUTER_SCOPES, UPGRADE_POLICIES, type RouterScope, type UpgradePolicy } from "./routing-policy.ts";
 
 export type Config = Readonly<{
   typesafeApiKey: string;
@@ -14,14 +14,17 @@ export type Config = Readonly<{
   stateDir: string;
   scope: RouterScope;
   mainUpgrades: boolean;
+  upgrades: UpgradePolicy;
 }>;
 
 export const DEFAULTS = {
   port: 8787,
   anthropicUpstream: "https://api.anthropic.com",
   typesafeApiUrl: "https://api.typesafe.ai",
+  // Still ".claude-router" after the rename to jcm-router: changing it would orphan every existing log.
   stateDir: () => join(homedir(), ".claude-router"),
   scope: "all",
+  upgrades: "off",
 } as const;
 
 const API_KEY_PREFIX = "apikey_";
@@ -68,11 +71,13 @@ export function parseEnv(env: Env): Parsed {
   const scope = (env.ROUTER_SCOPE ?? DEFAULTS.scope) as RouterScope;
   if (!ROUTER_SCOPES.includes(scope)) errors.push(`ROUTER_SCOPE must be one of ${ROUTER_SCOPES.join(", ")}`);
   const mainUpgrades = bool("ROUTER_MAIN_UPGRADES", env.ROUTER_MAIN_UPGRADES, false, errors);
+  const upgrades = (env.ROUTER_UPGRADES ?? DEFAULTS.upgrades) as UpgradePolicy;
+  if (!UPGRADE_POLICIES.includes(upgrades)) errors.push(`ROUTER_UPGRADES must be one of ${UPGRADE_POLICIES.join(", ")}`);
 
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    config: Object.freeze({ typesafeApiKey, typesafeApiUrl, port, anthropicUpstream, dryRun, logPrompts, stateDir, scope, mainUpgrades }),
+    config: Object.freeze({ typesafeApiKey, typesafeApiUrl, port, anthropicUpstream, dryRun, logPrompts, stateDir, scope, mainUpgrades, upgrades }),
   };
 }
 

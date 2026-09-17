@@ -22,6 +22,7 @@ describe("parseEnv", () => {
       logPrompts: true,
       scope: "all",
       mainUpgrades: false,
+      upgrades: "off",
     });
     expect(r.config.stateDir.endsWith("/.claude-router")).toBe(true);
     expect(Object.isFrozen(r.config)).toBe(true);
@@ -38,6 +39,7 @@ describe("parseEnv", () => {
       ROUTER_STATE_DIR: "/tmp/x",
       ROUTER_SCOPE: "subagents",
       ROUTER_MAIN_UPGRADES: "1",
+      ROUTER_UPGRADES: "confident",
     });
     expect(r.ok && r.config).toEqual({
       typesafeApiKey: "apikey_test",
@@ -49,6 +51,7 @@ describe("parseEnv", () => {
       stateDir: "/tmp/x",
       scope: "subagents",
       mainUpgrades: true,
+      upgrades: "confident",
     });
   });
 
@@ -76,6 +79,7 @@ describe("parseEnv", () => {
   test("bad scope", () => {
     expect(errorsOf({ ...valid, ROUTER_SCOPE: "main" })).toEqual(["ROUTER_SCOPE must be one of subagents, all"]);
     expect(errorsOf({ ...valid, ROUTER_MAIN_UPGRADES: "yes" })).toEqual(["ROUTER_MAIN_UPGRADES must be one of 1, 0, true, false"]);
+    expect(errorsOf({ ...valid, ROUTER_UPGRADES: "maybe" })).toEqual(["ROUTER_UPGRADES must be one of off, confident, on"]);
   });
 
   test("reports all errors together", () => {

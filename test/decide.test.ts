@@ -23,7 +23,7 @@ const previous: Decision = {
   at: "",
 };
 
-const policy = { scope: "all" as const, mainUpgrades: false };
+const policy = { scope: "all" as const, mainUpgrades: false, upgrades: "on" as const };
 const base = { key: "abcdef0123456789", requested, overrides: {}, previous: null, jevMs: 5, contextTokens: 250, skip: null, policy };
 
 describe("parseOverrides", () => {
@@ -136,5 +136,53 @@ describe("decide", () => {
     expect(decide({ ...base, kind: "main", answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "haiku", source: "jev" });
     expect(decide({ ...base, kind: "subagent", contextTokens: 360_000, answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "sonnet", source: "jev" });
     expect(decide({ ...base, kind: "main", contextTokens: 360_000, overrides: { alias: "opus" }, answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "opus", source: "override" });
+  });
+});
+
+describe("decide with ROUTER_UPGRADES", () => {
+  const off = { ...base, kind: "subagent" as const, policy: { ...policy, upgrades: "off" as const } };
+  const confident = { ...base, kind: "subagent" as const, policy: { ...policy, upgrades: "confident" as const } };
+
+  test("off: a subagent upgrade keeps the requested model and is journalled as upgrade_blocked", () => {
+    const d = decide({ ...off, answers: answers("opus", 0.95, "high", 0.95) });
+    expect(d).toMatchObject({ alias: "sonnet", model: "claude-sonnet-5", effort: "low", source: "skipped", skipReason: "upgrade_blocked" });
+    expect(d.cost).toBeUndefined();
+    expect(d.confidences.model).toBe(0.95);
+    expect(isNoop(d, requested)).toBe(true);
+  });
+
+  test("off: downgrades and same-price picks still route", () => {
+    expect(decide({ ...off, answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "haiku", source: "jev" });
+    expect(decide({ ...off, answers: answers("sonnet", 0.9, "low", 0.9) })).toMatchObject({ alias: "sonnet", effort: "low", source: "jev" });
+    expect(decide({ ...off, requested: { model: "claude-sonnet-5", effort: "high" }, answers: answers("sonnet", 0.9, "low", 0.9) })).toMatchObject({ effort: "low", source: "jev" });
+  });
+
+  test("off: the ceiling is the request, not the last routed model", () => {
+    const onHaiku: Decision = { ...previous, alias: "haiku", model: "claude-haiku-4-5", effort: null };
+    const d = decide({ ...off, previous: onHaiku, answers: answers("sonnet", 0.9, "low", 0.9) });
+    expect(d).toMatchObject({ alias: "sonnet", effort: "low", source: "jev" });
+  });
+
+  test("off: more effort on the same model is an upgrade too", () => {
+    const d = decide({ ...off, answers: answers("sonnet", 0.9, "high", 0.9) });
+    expect(d).toMatchObject({ alias: "sonnet", effort: "low", source: "skipped", skipReason: "upgrade_blocked" });
+  });
+
+  test("off: an override, and a follow-up of one, still upgrade", () => {
+    expect(decide({ ...off, overrides: { alias: "opus" }, answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "opus", source: "override" });
+    const viaOverride: Decision = { ...previous, source: "override" };
+    expect(decide({ ...off, previous: viaOverride, answers: answers("haiku", 0.9, "low", 0.9, 0.95) })).toMatchObject({ alias: "opus", effort: "high", source: "followup" });
+  });
+
+  test("confident: opus at 0.85 goes through, 0.7 is blocked, sonnet from haiku is blocked however sure", () => {
+    expect(decide({ ...confident, answers: answers("opus", 0.85, "high", 0.9) })).toMatchObject({ alias: "opus", source: "jev" });
+    expect(decide({ ...confident, answers: answers("opus", 0.7, "high", 0.9) })).toMatchObject({ alias: "sonnet", source: "skipped", skipReason: "upgrade_blocked" });
+    const fromHaiku = { ...confident, requested: { model: "claude-haiku-4-5", effort: null } };
+    expect(decide({ ...fromHaiku, answers: answers("sonnet", 0.99, "low", 0.9) })).toMatchObject({ alias: "haiku", source: "skipped", skipReason: "upgrade_blocked" });
+  });
+
+  test("off beats ROUTER_MAIN_UPGRADES=1 on a small main context too", () => {
+    const d = decide({ ...base, kind: "main", policy: { scope: "all", mainUpgrades: true, upgrades: "off" }, answers: answers("opus", 0.95, "high", 0.95) });
+    expect(d).toMatchObject({ alias: "sonnet", source: "skipped", skipReason: "upgrade_blocked" });
   });
 });
