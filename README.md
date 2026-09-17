@@ -218,6 +218,23 @@ before it goes anywhere.
 
 ## Dashboard, statusline and tuning
 
+![The dashboard when routing is saving money](docs/screenshots/dashboard-saving.png)
+
+The verdict is the whole point: actual spend against what the same work would have cost unrouted,
+split by main chat and subagents, then the receipts underneath. When it is costing you, it says so
+just as plainly.
+
+![The dashboard when routing is costing money](docs/screenshots/dashboard-costing.png)
+
+Dark mode and the empty first-run state:
+
+![The dashboard in dark mode](docs/screenshots/dashboard-dark.png)
+
+![The dashboard before any requests have been routed](docs/screenshots/dashboard-empty.png)
+
+The screenshots above use the bundled sample fixtures, not real traffic. Run
+`bun scripts/dashboard-preview.ts` to see them yourself on port 8795.
+
 `bun run dashboard` (started for you by `bun run up`) serves a live verdict on
 `~/.claude-router/decisions.jsonl`: actual versus baseline cost split by main chat and subagents,
 cache hit rates, switch and recache counts, and the last 100 decisions. See

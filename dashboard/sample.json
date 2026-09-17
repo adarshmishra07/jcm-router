@@ -1,0 +1,783 @@
+{
+  "saving": {
+    "generated_at": "2026-09-17T07:32:09.935Z",
+    "log": "/path/to/project/.claude-router/decisions.jsonl",
+    "records": 378,
+    "unpriced": 0,
+    "verdict": {
+      "overall": {
+        "requests": 373,
+        "actual": 71.2043,
+        "baseline": 106.2706,
+        "delta": -35.0663
+      },
+      "main": {
+        "requests": 209,
+        "actual": 48.11,
+        "baseline": 66.4847,
+        "delta": -18.3747
+      },
+      "subagent": {
+        "requests": 164,
+        "actual": 23.0943,
+        "baseline": 39.7859,
+        "delta": -16.6916
+      }
+    },
+    "cache": {
+      "byModel": [
+        {
+          "model": "claude-haiku-4-5",
+          "requests": 17,
+          "cache_read": 512451,
+          "cache_created": 601375,
+          "hit_rate": 0.4600817362855599
+        },
+        {
+          "model": "claude-opus-5",
+          "requests": 217,
+          "cache_read": 57376551,
+          "cache_created": 3307392,
+          "hit_rate": 0.9454980702226288
+        },
+        {
+          "model": "claude-sonnet-5",
+          "requests": 85,
+          "cache_read": 36647955,
+          "cache_created": 4513993,
+          "hit_rate": 0.8903357780831948
+        },
+        {
+          "model": "claude-fable-5-1",
+          "requests": 95,
+          "cache_read": 16647857,
+          "cache_created": 1032763,
+          "hit_rate": 0.9415878515572418
+        },
+        {
+          "model": "claude-opus-4-7",
+          "requests": 1,
+          "cache_read": 0,
+          "cache_created": 94417,
+          "hit_rate": 0
+        }
+      ],
+      "switches": 98,
+      "recaches": 31,
+      "recached_tokens": 1204551
+    },
+    "rows": [
+      {
+        "at": "07:31:56",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/xhigh",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": -0.1397185
+      },
+      {
+        "at": "07:31:49",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "fable/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:40",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "fable/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:32",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/xhigh",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": -0.009291499999999953
+      },
+      {
+        "at": "07:31:27",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "Summarise your last action in 3 to 5 words for the status line",
+        "requested": "claude-fable-5-1/high",
+        "routed": "haiku/default",
+        "source": "jev",
+        "confidence": "0.97",
+        "jev_ms": 345,
+        "status": 200,
+        "delta": 0.10435599999999999
+      },
+      {
+        "at": "07:31:25",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:19",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:14",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:10",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:30:35",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "add pagination to the orders endpoint and cover it with tests",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "skipped: context_too_large",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:29:42",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "what is 2+2",
+        "requested": "claude-sonnet-5/default",
+        "routed": "sonnet/default",
+        "source": "fallback",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 401,
+        "delta": ""
+      },
+      {
+        "at": "07:28:14",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "Work in /path/to/jcm-router. Task: design and build a",
+        "requested": "claude-fable-5-1/high",
+        "routed": "fable/high",
+        "source": "fallback",
+        "confidence": "0.69",
+        "jev_ms": 400,
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:28:03",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "the upload button does nothing on mobile, find out why",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "skipped: context_too_large",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:27:40",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "Refactor the retry logic so a failure is attributed to the call that caused it, and add a test",
+        "requested": "claude-opus-5/high",
+        "routed": "sonnet/high",
+        "source": "skipped: context_too_large",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:27:30",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "grep for every caller of parseConfig and report which ones skip validation",
+        "requested": "claude-fable-5-1/high",
+        "routed": "haiku/low",
+        "source": "fallback",
+        "confidence": "0.41",
+        "jev_ms": 1420,
+        "status": 200,
+        "delta": -0.2134
+      },
+      {
+        "at": "07:27:25",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 529,
+        "delta": ""
+      },
+      {
+        "at": "07:27:24",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "<script>alert(1)</script> summarise the README & say \"done\"",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/max",
+        "source": "jev",
+        "confidence": "0.93",
+        "jev_ms": 310,
+        "status": 200,
+        "delta": 0.412
+      },
+      {
+        "at": "07:27:18",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "Work in /path/to/jcm-router. This repo is about to be",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/max",
+        "source": "jev",
+        "confidence": "0.81",
+        "jev_ms": 1860,
+        "status": 200,
+        "delta": 0.07389100000000001
+      }
+    ],
+    "jev": {
+      "count": 95,
+      "p50": 332,
+      "p95": 828,
+      "errors": [
+        {
+          "reason": "TimeoutError: The operation timed out.",
+          "requests": 2,
+          "fallbacks": 2
+        }
+      ],
+      "sources": [
+        {
+          "source": "jev",
+          "requests": 68
+        },
+        {
+          "source": "cached",
+          "requests": 316
+        },
+        {
+          "source": "fallback",
+          "requests": 26
+        },
+        {
+          "source": "followup",
+          "requests": 3
+        },
+        {
+          "source": "skipped: context_too_large",
+          "requests": 9
+        }
+      ],
+      "confidence": [
+        {
+          "bucket": "0.00 to 0.50",
+          "requests": 4
+        },
+        {
+          "bucket": "0.50 to 0.70",
+          "requests": 9
+        },
+        {
+          "bucket": "0.70 to 0.90",
+          "requests": 31
+        },
+        {
+          "bucket": "0.90 to 1.00",
+          "requests": 50
+        }
+      ]
+    },
+    "context_measured": true
+  },
+  "losing": {
+    "generated_at": "2026-09-17T07:32:09.935Z",
+    "log": "/path/to/project/.claude-router/decisions.jsonl",
+    "records": 378,
+    "unpriced": 7,
+    "verdict": {
+      "overall": {
+        "requests": 422,
+        "actual": 141.14370959999997,
+        "baseline": 122.78760910000007,
+        "delta": 18.35610050000001
+      },
+      "main": {
+        "requests": 226,
+        "actual": 92.26061690000002,
+        "baseline": 75.13827349999998,
+        "delta": 17.122343400000005
+      },
+      "subagent": {
+        "requests": 196,
+        "actual": 48.883092700000006,
+        "baseline": 47.64933560000001,
+        "delta": 1.233757100000004
+      }
+    },
+    "cache": {
+      "byModel": [
+        {
+          "model": "claude-haiku-4-5",
+          "requests": 17,
+          "cache_read": 512451,
+          "cache_created": 601375,
+          "hit_rate": 0.4600817362855599
+        },
+        {
+          "model": "claude-opus-5",
+          "requests": 217,
+          "cache_read": 57376551,
+          "cache_created": 3307392,
+          "hit_rate": 0.9454980702226288
+        },
+        {
+          "model": "claude-sonnet-5",
+          "requests": 85,
+          "cache_read": 36647955,
+          "cache_created": 4513993,
+          "hit_rate": 0.8903357780831948
+        },
+        {
+          "model": "claude-fable-5-1",
+          "requests": 95,
+          "cache_read": 16647857,
+          "cache_created": 1032763,
+          "hit_rate": 0.9415878515572418
+        },
+        {
+          "model": "claude-opus-4-7",
+          "requests": 1,
+          "cache_read": 0,
+          "cache_created": 94417,
+          "hit_rate": 0
+        }
+      ],
+      "switches": 243,
+      "recaches": 208,
+      "recached_tokens": 6568984
+    },
+    "rows": [
+      {
+        "at": "07:31:56",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/xhigh",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": -0.1397185
+      },
+      {
+        "at": "07:31:49",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "fable/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:40",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "fable/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:32",
+        "kind": "subagent",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/xhigh",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": -0.009291499999999953
+      },
+      {
+        "at": "07:31:27",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "Summarise your last action in 3 to 5 words for the status line",
+        "requested": "claude-fable-5-1/high",
+        "routed": "haiku/default",
+        "source": "jev",
+        "confidence": "0.97",
+        "jev_ms": 345,
+        "status": 200,
+        "delta": 0.10435599999999999
+      },
+      {
+        "at": "07:31:25",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:19",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:14",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:31:10",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:30:35",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "add pagination to the orders endpoint and cover it with tests",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "skipped: context_too_large",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:29:42",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "what is 2+2",
+        "requested": "claude-sonnet-5/default",
+        "routed": "sonnet/default",
+        "source": "fallback",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 401,
+        "delta": ""
+      },
+      {
+        "at": "07:28:14",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "Work in /path/to/jcm-router. Task: design and build a",
+        "requested": "claude-fable-5-1/high",
+        "routed": "fable/high",
+        "source": "fallback",
+        "confidence": "0.69",
+        "jev_ms": 400,
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:28:03",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "the upload button does nothing on mobile, find out why",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "skipped: context_too_large",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:27:40",
+        "kind": "main",
+        "turn": "new",
+        "prompt": "Refactor the retry logic so a failure is attributed to the call that caused it, and add a test",
+        "requested": "claude-opus-5/high",
+        "routed": "sonnet/high",
+        "source": "skipped: context_too_large",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 200,
+        "delta": 0
+      },
+      {
+        "at": "07:27:30",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "grep for every caller of parseConfig and report which ones skip validation",
+        "requested": "claude-fable-5-1/high",
+        "routed": "haiku/low",
+        "source": "fallback",
+        "confidence": "0.41",
+        "jev_ms": 1420,
+        "status": 200,
+        "delta": -0.2134
+      },
+      {
+        "at": "07:27:25",
+        "kind": "main",
+        "turn": "continuation",
+        "prompt": "",
+        "requested": "claude-opus-5/high",
+        "routed": "opus/high",
+        "source": "cached",
+        "confidence": "",
+        "jev_ms": "",
+        "status": 529,
+        "delta": ""
+      },
+      {
+        "at": "07:27:24",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "<script>alert(1)</script> summarise the README & say \"done\"",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/max",
+        "source": "jev",
+        "confidence": "0.93",
+        "jev_ms": 310,
+        "status": 200,
+        "delta": 0.412
+      },
+      {
+        "at": "07:27:18",
+        "kind": "subagent",
+        "turn": "new",
+        "prompt": "Work in /path/to/jcm-router. This repo is about to be",
+        "requested": "claude-fable-5-1/high",
+        "routed": "opus/max",
+        "source": "jev",
+        "confidence": "0.81",
+        "jev_ms": 1860,
+        "status": 200,
+        "delta": 0.07389100000000001
+      }
+    ],
+    "jev": {
+      "count": 95,
+      "p50": 332,
+      "p95": 828,
+      "errors": [
+        {
+          "reason": "unknown",
+          "requests": 24,
+          "fallbacks": 24
+        },
+        {
+          "reason": "TimeoutError: The operation timed out.",
+          "requests": 1,
+          "fallbacks": 1
+        },
+        {
+          "reason": "http 401",
+          "requests": 1,
+          "fallbacks": 1
+        }
+      ],
+      "sources": [
+        {
+          "source": "jev",
+          "requests": 68
+        },
+        {
+          "source": "cached",
+          "requests": 316
+        },
+        {
+          "source": "fallback",
+          "requests": 26
+        },
+        {
+          "source": "followup",
+          "requests": 3
+        },
+        {
+          "source": "skipped: context_too_large",
+          "requests": 9
+        }
+      ],
+      "confidence": [
+        {
+          "bucket": "0.00 to 0.50",
+          "requests": 13
+        },
+        {
+          "bucket": "0.50 to 0.70",
+          "requests": 13
+        },
+        {
+          "bucket": "0.70 to 0.90",
+          "requests": 20
+        },
+        {
+          "bucket": "0.90 to 1.00",
+          "requests": 49
+        }
+      ]
+    }
+  },
+  "empty": {
+    "generated_at": "2026-09-17T07:32:09.935Z",
+    "log": "/path/to/project/.claude-router/decisions.jsonl",
+    "records": 0,
+    "unpriced": 0,
+    "verdict": {
+      "overall": {
+        "requests": 0,
+        "actual": 0,
+        "baseline": 0,
+        "delta": 0
+      },
+      "main": {
+        "requests": 0,
+        "actual": 0,
+        "baseline": 0,
+        "delta": 0
+      },
+      "subagent": {
+        "requests": 0,
+        "actual": 0,
+        "baseline": 0,
+        "delta": 0
+      }
+    },
+    "cache": {
+      "byModel": [],
+      "switches": 0,
+      "recaches": 0,
+      "recached_tokens": 0
+    },
+    "rows": [],
+    "jev": {
+      "count": 0,
+      "p50": 0,
+      "p95": 0,
+      "errors": [],
+      "sources": [],
+      "confidence": [
+        {
+          "bucket": "0.00 to 0.50",
+          "requests": 0
+        },
+        {
+          "bucket": "0.50 to 0.70",
+          "requests": 0
+        },
+        {
+          "bucket": "0.70 to 0.90",
+          "requests": 0
+        },
+        {
+          "bucket": "0.90 to 1.00",
+          "requests": 0
+        }
+      ]
+    }
+  }
+}
