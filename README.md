@@ -198,7 +198,8 @@ proxy at startup with the list of problems.
 | `ROUTER_LOG_PROMPTS` | `1` | `0`: keep prompt previews out of `decisions.jsonl`. |
 | `ROUTER_STATE_DIR` | `~/.claude-router` | Where `last.json` and `decisions.jsonl` are written. |
 | `ROUTER_SCOPE` | `all` | `all`: route subagents and the main chat, the latter only while a switch is cheap. `subagents`: never touch the main chat. |
-| `ROUTER_MAIN_UPGRADES` | `0` | `1`: a main-chat turn past the size gate may still be upgraded to a more expensive model when Jev is confident it is hard. Never downgraded. Deliberately spends more for quality. |
+| `ROUTER_UPGRADES` | `off` | May a request go to something pricier than it asked for? `off`: never, so the router can only save or do nothing. `confident`: only to opus or fable, and only above 0.8 confidence. `on`: honour every Jev pick. More effort on the same model counts as pricier. Manual overrides (`!opus`) always win. |
+| `ROUTER_MAIN_UPGRADES` | `0` | `1`: a main-chat turn past the size gate may still be upgraded to a more expensive model when Jev is confident it is hard. Never downgraded. Deliberately spends more for quality. `ROUTER_UPGRADES=off` overrides this. |
 
 `ANTHROPIC_API_KEY` is not needed. Authentication comes from the headers Claude Code sends.
 
