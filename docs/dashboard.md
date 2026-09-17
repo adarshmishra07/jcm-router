@@ -121,3 +121,46 @@ The run cost uses TypeSafe's homepage price (checked 2026-09-17): $0.042 per mil
 output free. There is no /pricing page, so it may drift; override with `JEV_PRICE_IN` and
 `JEV_PRICE_OUT` (USD per million tokens). The dashboard does not show Jev spend because decision
 records carry Jev latency but not its token counts, so there is nothing honest to sum.
+
+## Tuner
+
+```sh
+bun run tune                # every threshold, whole log
+bun run tune --since 7d     # last week only
+bun run tune --json         # same data, machine readable
+```
+
+Replays `<ROUTER_STATE_DIR>/decisions.jsonl` and reports, for each threshold in
+`src/routing-policy.ts`, what the log would have cost with other values in force. It is a report,
+not a control loop: it never edits `src/` and never changes routing. You read the table and change
+one constant by hand.
+
+### How the sweep works
+
+A decision the candidate value would have blocked reverts to its baseline (the request priced as
+Claude Code sent it), and every tool-loop continuation of that turn reverts with it, since a
+continuation runs on whatever its turn decided. Everything the value never gated (overrides,
+fallbacks, skips) keeps its logged cost. Summed over the log, that gives one delta per candidate;
+`vs_current` is the difference against the value in `src/routing-policy.ts`, and `*` marks it.
+
+The sweep only undoes decisions the router took. It cannot invent the ones a looser value would
+have made, so the curve is flat below whatever floor the log was collected under. For the two main
+chat gates it also lists how many skipped turns a looser value would have exposed to Jev, with the
+re-cache each was priced at (an estimate from context size, not a bill).
+
+### How to read it honestly
+
+- **It measures money and reliability, not quality.** The log does not record whether the routed
+  model did the job well. The verdict line pairs the money-optimal value with the range the eval
+  supports and, where they disagree, recommends the safer one. `EVAL_SUPPORTED` in
+  `scripts/tune.ts` is hand-copied from the last `bun run eval` run and dated; Jev's confidences
+  move a case or two between runs, so re-run the eval before trusting an edge.
+- **"Resting on N decisions"** says how many decisions separate the money-optimal value from the
+  current one. A $6 gap resting on four decisions is one long main-chat turn, not a trend.
+- **Effort is not priced.** Its sweep counts decisions and nothing else, because effort has no line
+  on the price list and the log cannot separate its output tokens from the task's.
+- **Reliability** groups upstream 4xx/5xx and retries by the target that was attempted. A retried
+  record is one failure, filed under the model Jev picked (the one that was rejected), not the one
+  that eventually answered. A target with a failure rate far above the rest is called out.
+- **Jev cost** is not in the log (records carry latency, not token counts). `bun run eval` prints
+  the per-call price.

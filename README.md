@@ -242,7 +242,10 @@ cache hit rates, switch and recache counts, and the last 100 decisions. See
 [docs/dashboard.md](docs/dashboard.md), which also covers the eval harness (`bun run eval`) used to
 tune the thresholds without spending anything on Claude.
 
-`bun run report` prints the same log as text, `--since 2h` to narrow it.
+`bun run report` prints the same log as text, `--since 2h` to narrow it. `bun run tune` replays the
+log and reports what each threshold would have cost at other values, in money terms only; it is a
+report you act on by editing one constant, not a tuner that changes anything (see
+[docs/dashboard.md](docs/dashboard.md#tuner)).
 
 Claude Code's own status bar shows the model you launched with, not the routed one. `statusline.ts`
 prints the last decision, for example `⇄ opus · high`. In `~/.claude/settings.json`:
