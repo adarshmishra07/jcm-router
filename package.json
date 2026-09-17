@@ -1,0 +1,18 @@
+{
+  "name": "claude-router",
+  "version": "0.1.0",
+  "description": "Local proxy that picks a Claude model and effort per message for Claude Code, using TypeSafe Jev",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "bun src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "report": "bun scripts/report.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
