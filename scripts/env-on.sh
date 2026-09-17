@@ -7,10 +7,12 @@ SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 STATE_DIR="${ROUTER_STATE_DIR:-$HOME/.claude-router}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if ! command -v jq >/dev/null 2>&1; then
-  echo "env-on: jq is required. Install it with: brew install jq" >&2
-  exit 1
-fi
+for cmd in jq curl; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "env-on: $cmd is required. Install it with: brew install $cmd" >&2
+    exit 1
+  fi
+done
 if [ ! -f "$SETTINGS" ]; then
   echo "env-on: $SETTINGS does not exist. Start Claude Code once, or set CLAUDE_SETTINGS to the right path." >&2
   exit 1
@@ -21,6 +23,15 @@ if [ -z "${PORT:-}" ] && [ -f "$ROOT/.env" ]; then
 fi
 PORT="${PORT:-8787}"
 BASE_URL="http://localhost:$PORT"
+
+# Claude Code reads this once, at session start, and then has nowhere else to go. Pointing it at a port with
+# nothing on it breaks every request, not just the routed ones, so refuse before writing anything.
+if ! curl -fsS --max-time 2 "$BASE_URL/healthz" >/dev/null 2>&1; then
+  echo "env-on: nothing answered $BASE_URL/healthz, so settings.json was not touched." >&2
+  echo "        Start the proxy first (bun run up), then run this again." >&2
+  echo "        If the proxy runs on another port, set PORT to it." >&2
+  exit 1
+fi
 
 mkdir -p "$STATE_DIR/backup"
 BACKUP="$STATE_DIR/backup/settings.json.$(date +%Y%m%d-%H%M%S)"

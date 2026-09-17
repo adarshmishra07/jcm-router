@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DecisionRecord } from "../src/decision-log.ts";
+import { healthBody, type Health } from "../src/health.ts";
 import { THRESHOLDS } from "../src/routing-policy.ts";
 import { startServer } from "../src/server.ts";
 
@@ -76,6 +77,13 @@ beforeAll(async () => {
     logPrompts: true,
     stateDir,
     policy: { scope: "all" as const, mainUpgrades: false, upgrades: "on" as const },
+    health: () =>
+      healthBody({
+        mode: "routing" as const,
+        supervision: { started_at: new Date(Date.now() - 2000).toISOString(), restarts: 2, last_crash: { at: "2026-09-17T08:00:00.000Z", code: 1, ran_ms: 40 } },
+        profile: { port: 0, upstream: "http://fake", scope: "all", upgrades: "on", main_upgrades: false, dry_run: false, log_prompts: true },
+        jevKey: true,
+      }),
     log: (l: string) => logs.push(l),
   };
   proxy = startServer({ ...base, dryRun: false });
@@ -296,6 +304,23 @@ describe("proxy", () => {
     await post(proxy, subagentBody("what is 17*23, answer only the number"));
     expect(upstreamSeen[0]!.body?.model).toBe("claude-haiku-4-5");
     expect(await lastJson()).toMatchObject({ kind: "subagent", alias: "haiku" });
+  });
+
+  test("/healthz answers while routing, without auth, without the key and without calling upstream", async () => {
+    const res = await fetch(`http://localhost:${proxy.port}/healthz`);
+    expect(res.status).toBe(200);
+    const health = (await res.json()) as Health;
+    expect(health).toMatchObject({
+      mode: "routing",
+      restarts: 2,
+      jev_key: true,
+      last_crash: { code: 1, ran_ms: 40 },
+      profile: { scope: "all", upgrades: "on", main_upgrades: false, dry_run: false },
+    });
+    expect(health.uptime_s).toBeGreaterThan(0);
+    expect(JSON.stringify(health)).not.toContain("apikey");
+    expect(upstreamSeen).toHaveLength(0);
+    expect(jevSeen).toHaveLength(0);
   });
 
   test("requests without tools and other paths pass straight through", async () => {

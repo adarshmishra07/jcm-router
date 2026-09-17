@@ -7,6 +7,7 @@ import { classifyRequest, requestKind, type MessagesBody, type Turn } from "./co
 import { estimateContextTokens } from "./cost.ts";
 import { aliasOfModel, decide, isNoop, isOverridden, parseOverrides, requestedOf, type Decision, type RequestKind, type Requested } from "./decide.ts";
 import { appendRecord, formatLine, writeLastDecision, PROMPT_PREVIEW_CHARS, type DecisionRecord } from "./decision-log.ts";
+import { HEALTH_PATH, type Health } from "./health.ts";
 import { askJev, type JevClient, type JevResult } from "./jev.ts";
 import { forward, isRewriteRejection, withoutLongContextBeta } from "./proxy.ts";
 import { applyDecision } from "./rewrite.ts";
@@ -21,6 +22,8 @@ export type ServerOptions = {
   logPrompts: boolean;
   stateDir: string;
   policy: ScopePolicy;
+  // Answered on /healthz. A thunk so uptime is read when asked, not when the server started.
+  health: () => Health;
   log: (line: string) => void;
 };
 
@@ -149,6 +152,8 @@ export function startServer(o: ServerOptions) {
     idleTimeout: 255,
     async fetch(req) {
       const { pathname } = new URL(req.url);
+      // No auth, no upstream call: this is what tells a caller whether the port in front of them routes at all.
+      if (req.method === "GET" && pathname === HEALTH_PATH) return Response.json(o.health());
       if (req.method === "POST" && pathname === ROUTED_PATH) return handleMessages(req);
       const hasBody = req.method !== "GET" && req.method !== "HEAD";
       return forward(o.upstream, req, hasBody ? await req.text() : undefined);

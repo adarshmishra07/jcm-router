@@ -1,9 +1,15 @@
-import { loadEnv } from "./env.ts";
+import { describeEnv, hasJevKey, loadEnv } from "./env.ts";
+import { SUPERVISION_ENV, healthBody, parseSupervision } from "./health.ts";
 import { JEV_PATH, JEV_TIMEOUT_MS } from "./jev.ts";
 import { startServer } from "./server.ts";
 
 const config = loadEnv();
 const log = (line: string) => console.log(line);
+
+// Set by scripts/supervise.ts when this process is a respawn. Run on its own, this is a first start.
+const supervision = parseSupervision(process.env[SUPERVISION_ENV]);
+const profile = describeEnv(process.env);
+const jevKey = hasJevKey(process.env);
 
 const server = startServer({
   port: config.port,
@@ -13,6 +19,7 @@ const server = startServer({
   logPrompts: config.logPrompts,
   stateDir: config.stateDir,
   policy: { scope: config.scope, mainUpgrades: config.mainUpgrades, upgrades: config.upgrades },
+  health: () => healthBody({ mode: "routing", supervision, profile, jevKey }),
   log,
 });
 

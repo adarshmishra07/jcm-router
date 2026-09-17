@@ -6,7 +6,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "start": "bun src/index.ts",
+    "start": "bun scripts/supervise.ts",
     "up": "bun scripts/up.ts",
     "dashboard": "bun scripts/dashboard.ts",
     "eval": "bun scripts/eval.ts",

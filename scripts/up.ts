@@ -49,7 +49,8 @@ if (import.meta.main) {
 
   const root = new URL("..", import.meta.url).pathname;
   const children = [
-    { tag: "proxy", proc: Bun.spawn(["bun", "src/index.ts"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] }) },
+    // Supervised, so a proxy crash does not take the port down with it. See scripts/supervise.ts.
+    { tag: "proxy", proc: Bun.spawn(["bun", "scripts/supervise.ts"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] }) },
     { tag: "dash", proc: Bun.spawn(["bun", "scripts/dashboard.ts", "--port", String(dashPort)], { cwd: root, stdio: ["ignore", "pipe", "pipe"] }) },
   ];
 

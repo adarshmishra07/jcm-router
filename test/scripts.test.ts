@@ -19,9 +19,12 @@ const SETTINGS = {
 describe("env-on.sh and env-off.sh", () => {
   let dir = "";
   let settings = "";
+  let port = 0;
+  // Stands in for a running proxy. env-on refuses to point Claude Code at a port that does not answer /healthz.
+  let health: ReturnType<typeof Bun.serve> | null = null;
   const run = (script: string, env: Record<string, string> = {}) =>
     Bun.spawn(["bash", join(ROOT, "scripts", script)], {
-      env: { ...process.env, CLAUDE_SETTINGS: settings, ROUTER_STATE_DIR: join(dir, "state"), PORT: "9911", ...env },
+      env: { ...process.env, CLAUDE_SETTINGS: settings, ROUTER_STATE_DIR: join(dir, "state"), PORT: String(port), ...env },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -30,18 +33,25 @@ describe("env-on.sh and env-off.sh", () => {
     dir = await mkdtemp(join(tmpdir(), "router-env-"));
     settings = join(dir, "settings.json");
     await Bun.write(settings, JSON.stringify(SETTINGS, null, 2));
+    health = Bun.serve({
+      port: 0,
+      fetch: (req) => (new URL(req.url).pathname === "/healthz" ? Response.json({ mode: "routing" }) : new Response("not found", { status: 404 })),
+    });
+    port = Number(health.port);
   });
   afterEach(async () => {
+    health?.stop(true);
+    health = null;
     await rm(dir, { recursive: true, force: true });
   });
 
   test("on then off round-trips and leaves every other key alone", async () => {
     const on = run("env-on.sh");
     expect(await on.exited).toBe(0);
-    expect(await new Response(on.stdout).text()).toContain("http://localhost:9911");
+    expect(await new Response(on.stdout).text()).toContain(`http://localhost:${port}`);
 
     const afterOn = await Bun.file(settings).json();
-    expect(afterOn.env.ANTHROPIC_BASE_URL).toBe("http://localhost:9911");
+    expect(afterOn.env.ANTHROPIC_BASE_URL).toBe(`http://localhost:${port}`);
     expect(afterOn.env.OTHER_KEY).toBe("keep me");
     expect(afterOn.model).toBe("opus");
     expect(afterOn.permissions).toEqual(SETTINGS.permissions);
@@ -53,7 +63,7 @@ describe("env-on.sh and env-off.sh", () => {
   test("both are safe to run twice", async () => {
     expect(await run("env-on.sh").exited).toBe(0);
     expect(await run("env-on.sh").exited).toBe(0);
-    expect((await Bun.file(settings).json()).env.ANTHROPIC_BASE_URL).toBe("http://localhost:9911");
+    expect((await Bun.file(settings).json()).env.ANTHROPIC_BASE_URL).toBe(`http://localhost:${port}`);
     expect(await run("env-off.sh").exited).toBe(0);
     expect(await run("env-off.sh").exited).toBe(0);
     expect(await Bun.file(settings).json()).toEqual(SETTINGS);
@@ -64,6 +74,25 @@ describe("env-on.sh and env-off.sh", () => {
     expect(await run("env-off.sh").exited).toBe(0);
     expect(await Bun.file(settings).json()).toEqual({ model: "opus" });
     expect((await readdir(join(dir, "state", "backup"))).length).toBeGreaterThan(0);
+  });
+
+  test("env-on refuses when nothing answers /healthz, and changes nothing", async () => {
+    health?.stop(true);
+    health = null;
+    const proc = run("env-on.sh");
+    expect(await proc.exited).toBe(1);
+    const err = await new Response(proc.stderr).text();
+    expect(err).toContain("/healthz");
+    expect(err).toContain("bun run up");
+    expect(await Bun.file(settings).json()).toEqual(SETTINGS);
+  });
+
+  test("env-off works with no proxy running: it is the way out when the proxy is dead", async () => {
+    await Bun.write(settings, JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://localhost:8787" } }));
+    health?.stop(true);
+    health = null;
+    expect(await run("env-off.sh").exited).toBe(0);
+    expect(await Bun.file(settings).json()).toEqual({ model: "opus" });
   });
 
   test("a missing settings file fails with a clear message", async () => {

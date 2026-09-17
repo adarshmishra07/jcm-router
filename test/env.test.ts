@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseEnv } from "../src/env.ts";
+import { describeEnv, hasJevKey, parseEnv } from "../src/env.ts";
 
 const valid = { TYPESAFE_API_KEY: "apikey_test" };
 
@@ -86,5 +86,39 @@ describe("parseEnv", () => {
     const errors = errorsOf({ PORT: "-1", ANTHROPIC_UPSTREAM: "nope", ROUTER_DRY_RUN: "maybe" });
     expect(errors).toHaveLength(4);
     expect(errors[0]).toContain("TYPESAFE_API_KEY");
+  });
+});
+
+describe("describeEnv", () => {
+  const env = { ...valid, PORT: "9000", ROUTER_SCOPE: "subagents", ROUTER_UPGRADES: "confident", ROUTER_MAIN_UPGRADES: "1", ROUTER_DRY_RUN: "1", ROUTER_LOG_PROMPTS: "0" };
+
+  // The profile on /healthz has to be the settings the router is actually running under, so it is read off the
+  // parsed config rather than from the environment a second time.
+  test("a valid environment is described by its own config, field for field", () => {
+    const parsed = parseEnv(env);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const c = parsed.config;
+    expect(describeEnv(env)).toEqual({
+      port: c.port,
+      upstream: c.anthropicUpstream,
+      scope: c.scope,
+      upgrades: c.upgrades,
+      main_upgrades: c.mainUpgrades,
+      dry_run: c.dryRun,
+      log_prompts: c.logPrompts,
+    });
+  });
+
+  test("an invalid environment still describes something, because that is when it is needed", () => {
+    // No key and a nonsense port: the router cannot start at all, and the supervisor still has to answer.
+    expect(describeEnv({ PORT: "abc", ROUTER_SCOPE: "nonsense" })).toMatchObject({ port: 8787, upstream: "https://api.anthropic.com", scope: "nonsense" });
+    expect(describeEnv({ PORT: "9100" })).toMatchObject({ port: 9100 });
+  });
+
+  test("hasJevKey is a boolean and nothing else", () => {
+    expect(hasJevKey({ TYPESAFE_API_KEY: "apikey_secret" })).toBe(true);
+    expect(hasJevKey({ TYPESAFE_API_KEY: "   " })).toBe(false);
+    expect(hasJevKey({})).toBe(false);
   });
 });

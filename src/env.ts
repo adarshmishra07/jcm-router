@@ -2,6 +2,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Profile } from "./health.ts";
 import { ROUTER_SCOPES, UPGRADE_POLICIES, type RouterScope, type UpgradePolicy } from "./routing-policy.ts";
 
 export type Config = Readonly<{
@@ -91,3 +92,36 @@ export function loadEnv(): Config {
 
 // For the statusline, which runs outside the proxy and only needs to know where last.json lives.
 export const loadStateDir = (): string => process.env.ROUTER_STATE_DIR || DEFAULTS.stateDir();
+
+// A boolean, and only ever a boolean. The key itself never leaves this file.
+export const hasJevKey = (env: Env = process.env): boolean => Boolean(env.TYPESAFE_API_KEY?.trim());
+
+const profileOf = (c: Config): Profile => ({
+  port: c.port,
+  upstream: c.anthropicUpstream,
+  scope: c.scope,
+  upgrades: c.upgrades,
+  main_upgrades: c.mainUpgrades,
+  dry_run: c.dryRun,
+  log_prompts: c.logPrompts,
+});
+
+const truthy = (raw: string | undefined, fallback: boolean): boolean => (raw === undefined ? fallback : BOOLEANS[raw] ?? fallback);
+
+// What /healthz reports about routing. Derived from the real config whenever the environment is valid, so the
+// two cannot drift. When it is invalid the router cannot start at all, which is exactly when the supervisor
+// still has to answer, so the fields fall back to the documented defaults instead of failing.
+export function describeEnv(env: Env = process.env): Profile {
+  const parsed = parseEnv(env);
+  if (parsed.ok) return profileOf(parsed.config);
+  const port = Number(env.PORT);
+  return {
+    port: Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULTS.port,
+    upstream: env.ANTHROPIC_UPSTREAM ?? DEFAULTS.anthropicUpstream,
+    scope: env.ROUTER_SCOPE ?? DEFAULTS.scope,
+    upgrades: env.ROUTER_UPGRADES ?? DEFAULTS.upgrades,
+    main_upgrades: truthy(env.ROUTER_MAIN_UPGRADES, false),
+    dry_run: truthy(env.ROUTER_DRY_RUN, false),
+    log_prompts: truthy(env.ROUTER_LOG_PROMPTS, true),
+  };
+}
