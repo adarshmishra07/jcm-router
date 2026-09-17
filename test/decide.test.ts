@@ -22,7 +22,8 @@ const previous: Decision = {
   at: "",
 };
 
-const base = { key: "abcdef0123456789", requested, overrides: {}, previous: null, jevMs: 5, bodyChars: 1000 };
+const policy = { scope: "all" as const, mainUpgrades: false };
+const base = { key: "abcdef0123456789", requested, overrides: {}, previous: null, jevMs: 5, contextTokens: 250, skip: null, policy };
 
 describe("parseOverrides", () => {
   test("reads leading model and effort tokens in any order", () => {
@@ -96,10 +97,33 @@ describe("decide", () => {
   });
 
   test("bumps haiku to sonnet when the request is large", () => {
-    const bodyChars = THRESHOLDS.HAIKU_MAX_TOKENS * 4 + 1;
-    const d = decide({ ...base, bodyChars, answers: answers("haiku", 0.9, "low", 0.9) });
+    const contextTokens = THRESHOLDS.HAIKU_MAX_TOKENS + 1;
+    const d = decide({ ...base, kind: "subagent", contextTokens, answers: answers("haiku", 0.9, "low", 0.9) });
     expect(d).toMatchObject({ alias: "sonnet", effort: "low" });
-    const e = decide({ ...base, bodyChars, overrides: { alias: "haiku" }, answers: null });
+    const e = decide({ ...base, contextTokens, overrides: { alias: "haiku" }, answers: null });
     expect(e.alias).toBe("sonnet");
+  });
+
+  test("a pre-Jev skip keeps the cached model and effort, not the requested ones", () => {
+    const d = decide({ ...base, previous, contextTokens: 400_000, skip: "context_too_large", answers: null, jevMs: null });
+    expect(d).toMatchObject({ alias: "opus", model: "claude-opus-5", effort: "high", source: "skipped", skipReason: "context_too_large" });
+    expect("cost" in d).toBe(false);
+    const fresh = decide({ ...base, skip: "scope", answers: null, jevMs: null });
+    expect(fresh).toMatchObject({ alias: "sonnet", model: "claude-sonnet-5", effort: "low", source: "skipped", skipReason: "scope" });
+    expect(isNoop(fresh, requested)).toBe(true);
+  });
+
+  test("the guard refuses a switch that is not worth it and records both costs", () => {
+    const d = decide({ ...base, kind: "main", contextTokens: 360_000, answers: answers("opus", 0.95, "high", 0.95) });
+    expect(d).toMatchObject({ alias: "sonnet", effort: "low", source: "skipped", skipReason: "switch_not_worth_it" });
+    expect(d.cost?.stay).toBeCloseTo(0.072, 6);
+    expect(d.cost?.switch).toBeCloseTo(3.6, 6);
+    expect(d.confidences.model).toBe(0.95);
+  });
+
+  test("small contexts route, subagents always route, overrides always win", () => {
+    expect(decide({ ...base, kind: "main", answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "haiku", source: "jev" });
+    expect(decide({ ...base, kind: "subagent", contextTokens: 360_000, answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "sonnet", source: "jev" });
+    expect(decide({ ...base, kind: "main", contextTokens: 360_000, overrides: { alias: "opus" }, answers: answers("haiku", 0.9, "low", 0.9) })).toMatchObject({ alias: "opus", source: "override" });
   });
 });

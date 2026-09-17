@@ -20,6 +20,8 @@ describe("parseEnv", () => {
       typesafeApiUrl: "https://api.typesafe.ai",
       dryRun: false,
       logPrompts: true,
+      scope: "all",
+      mainUpgrades: false,
     });
     expect(r.config.stateDir.endsWith("/.claude-router")).toBe(true);
     expect(Object.isFrozen(r.config)).toBe(true);
@@ -34,6 +36,8 @@ describe("parseEnv", () => {
       ROUTER_DRY_RUN: "true",
       ROUTER_LOG_PROMPTS: "0",
       ROUTER_STATE_DIR: "/tmp/x",
+      ROUTER_SCOPE: "subagents",
+      ROUTER_MAIN_UPGRADES: "1",
     });
     expect(r.ok && r.config).toEqual({
       typesafeApiKey: "apikey_test",
@@ -43,6 +47,8 @@ describe("parseEnv", () => {
       dryRun: true,
       logPrompts: false,
       stateDir: "/tmp/x",
+      scope: "subagents",
+      mainUpgrades: true,
     });
   });
 
@@ -65,6 +71,11 @@ describe("parseEnv", () => {
     expect(errorsOf({ ...valid, ROUTER_DRY_RUN: "yes" })).toEqual(["ROUTER_DRY_RUN must be one of 1, 0, true, false"]);
     expect(errorsOf({ ...valid, ROUTER_LOG_PROMPTS: "off" })).toEqual(["ROUTER_LOG_PROMPTS must be one of 1, 0, true, false"]);
     expect(parseEnv({ ...valid, ROUTER_DRY_RUN: "0" })).toMatchObject({ ok: true, config: { dryRun: false } });
+  });
+
+  test("bad scope", () => {
+    expect(errorsOf({ ...valid, ROUTER_SCOPE: "main" })).toEqual(["ROUTER_SCOPE must be one of subagents, all"]);
+    expect(errorsOf({ ...valid, ROUTER_MAIN_UPGRADES: "yes" })).toEqual(["ROUTER_MAIN_UPGRADES must be one of 1, 0, true, false"]);
   });
 
   test("reports all errors together", () => {

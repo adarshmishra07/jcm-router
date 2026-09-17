@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DecisionRecord } from "../src/decision-log.ts";
+import { THRESHOLDS } from "../src/routing-policy.ts";
 import { startServer } from "../src/server.ts";
 
 type Seen = { path: string; headers: Record<string, string>; body: { model?: string; [k: string]: unknown } | null; text: string };
@@ -55,6 +56,8 @@ const jev = Bun.serve({
 let stateDir: string;
 let proxy: ReturnType<typeof startServer>;
 let dryProxy: ReturnType<typeof startServer>;
+let subagentsProxy: ReturnType<typeof startServer>;
+let upgradesProxy: ReturnType<typeof startServer>;
 const logs: string[] = [];
 
 beforeAll(async () => {
@@ -65,15 +68,20 @@ beforeAll(async () => {
     jev: { url: `http://localhost:${jev.port}/v1/systemone`, apiKey: "apikey_test", timeoutMs: 1000 },
     logPrompts: true,
     stateDir,
+    policy: { scope: "all" as const, mainUpgrades: false },
     log: (l: string) => logs.push(l),
   };
   proxy = startServer({ ...base, dryRun: false });
   dryProxy = startServer({ ...base, dryRun: true, stateDir: join(stateDir, "dry") });
+  subagentsProxy = startServer({ ...base, dryRun: false, stateDir: join(stateDir, "sub"), policy: { scope: "subagents", mainUpgrades: false } });
+  upgradesProxy = startServer({ ...base, dryRun: false, stateDir: join(stateDir, "up"), policy: { scope: "all", mainUpgrades: true } });
 });
 
 afterAll(async () => {
   proxy.stop(true);
   dryProxy.stop(true);
+  subagentsProxy.stop(true);
+  upgradesProxy.stop(true);
   upstream.stop(true);
   jev.stop(true);
   await rm(stateDir, { recursive: true, force: true });
@@ -103,6 +111,12 @@ const mainBody = (first: string, extraMessages: unknown[] = [], firstExtra: Reco
   tools: [{ name: "Bash" }],
   messages: [{ role: "user", content: [reminder, text(first, firstExtra), reminder] }, ...extraMessages],
 });
+
+// A conversation whose history is past the main-chat context gate. `first` keys the conversation, `prompt` is the new turn.
+const LARGE_CHARS = (THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS + 1000) * 4;
+const largeBody = (first: string, prompt: string) =>
+  mainBody(first, [{ role: "assistant", content: [text("x".repeat(LARGE_CHARS))] }, { role: "user", content: [text(prompt)] }]);
+const subagentBody = (prompt: string) => ({ ...mainBody(prompt), system: "You are an agent for Claude Code, Anthropic's official CLI for Claude. Given the user's message..." });
 
 const post = async (server: ReturnType<typeof startServer>, body: unknown, path = "/v1/messages") => {
   const res = await fetch(`http://localhost:${server.port}${path}`, {
@@ -157,7 +171,9 @@ describe("proxy", () => {
       upstream: { status: 200, retried_with_original: false },
       usage: { input_tokens: 10, output_tokens: 42, cache_read_input_tokens: 500, cache_creation_input_tokens: 0 },
     });
-    expect(logs.at(-1)).toMatch(/^\d\d:\d\d:\d\d  new   #[0-9a-f]{8} main  opus\/high +jev 0\.90\/0\.90 \d+ms +200 in \d\.\ds  "fix the race/);
+    expect(record!.context_tokens).toBeGreaterThan(100);
+    expect(record!.stay_cost).toBeLessThan(record!.switch_cost!);
+    expect(logs.at(-1)).toMatch(/^\d\d:\d\d:\d\d  new   #[0-9a-f]{8} main  opus\/high +0K  jev 0\.90\/0\.90 \d+ms stay \$0\.00\d switch \$0\.00\d +200 in \d\.\ds  "fix the race/);
   });
 
   test("tool-loop continuation reuses the cached decision without asking Jev, even with cache_control moved", async () => {
@@ -263,8 +279,7 @@ describe("proxy", () => {
 
   test("subagent requests are routed on their own task and labelled", async () => {
     jevAnswers = { ...jevAnswers, model: "haiku" };
-    const sub = { ...mainBody("what is 17*23, answer only the number"), system: "You are an agent for Claude Code, Anthropic's official CLI for Claude. Given the user's message..." };
-    await post(proxy, sub);
+    await post(proxy, subagentBody("what is 17*23, answer only the number"));
     expect(upstreamSeen[0]!.body?.model).toBe("claude-haiku-4-5");
     expect(await lastJson()).toMatchObject({ kind: "subagent", alias: "haiku" });
   });
@@ -288,5 +303,67 @@ describe("proxy", () => {
     expect(await lastJson(join(stateDir, "dry"))).toMatchObject({ alias: "opus", source: "jev" });
     expect((await journal(join(stateDir, "dry"))).at(-1)).toMatchObject({ source: "dry_run", routed: { alias: "opus" } });
     expect(logs.at(-1)).toContain("[dry, would be jev]");
+  });
+
+  test("a large main-chat turn is skipped without asking Jev and journaled with the reason", async () => {
+    const body = largeBody("long chat", "now what is 2+2");
+    await post(proxy, body);
+    expect(jevSeen).toHaveLength(0);
+    expect(upstreamSeen[0]!.text).toBe(JSON.stringify(body));
+    expect(await lastJson()).toMatchObject({ kind: "main", alias: "sonnet", effort: "low", source: "skipped", skipReason: "context_too_large" });
+    const record = (await journal()).at(-1)!;
+    expect(record).toMatchObject({ turn: "new", source: "skipped", skip_reason: "context_too_large", routed: { alias: "sonnet", effort: "low" }, jev: null });
+    expect(record.context_tokens).toBeGreaterThan(THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS);
+    expect(logs.at(-1)).toContain("skipped context_too_large");
+  });
+
+  test("once the context is large the conversation stays on the model it was routed to", async () => {
+    await post(proxy, mainBody("pinned chat"));
+    expect(upstreamSeen[0]!.body?.model).toBe("claude-opus-5");
+    await post(proxy, largeBody("pinned chat", "and now a follow-up"));
+    expect(jevSeen).toHaveLength(1);
+    expect(upstreamSeen[1]!.body).toMatchObject({ model: "claude-opus-5", output_config: { effort: "high" } });
+    expect(await lastJson()).toMatchObject({ alias: "opus", effort: "high", source: "skipped", skipReason: "context_too_large" });
+  });
+
+  test("ROUTER_SCOPE=subagents skips all main traffic and still routes subagents", async () => {
+    const body = mainBody("small main turn");
+    await post(subagentsProxy, body);
+    expect(jevSeen).toHaveLength(0);
+    expect(upstreamSeen[0]!.text).toBe(JSON.stringify(body));
+    expect((await journal(join(stateDir, "sub"))).at(-1)).toMatchObject({ kind: "main", source: "skipped", skip_reason: "scope" });
+
+    jevAnswers = { ...jevAnswers, model: "haiku" };
+    await post(subagentsProxy, subagentBody("what is 17*23"));
+    expect(jevSeen).toHaveLength(1);
+    expect(upstreamSeen[1]!.body?.model).toBe("claude-haiku-4-5");
+  });
+
+  test("ROUTER_MAIN_UPGRADES asks Jev on a large context and allows an upgrade but never a downgrade", async () => {
+    await post(upgradesProxy, largeBody("hard chat", "find the race condition"));
+    expect(jevSeen).toHaveLength(1);
+    expect(upstreamSeen[0]!.body).toMatchObject({ model: "claude-opus-5", output_config: { effort: "high" } });
+    const up = (await journal(join(stateDir, "up"))).at(-1)!;
+    expect(up).toMatchObject({ source: "jev", routed: { alias: "opus" } });
+    expect(up.switch_cost).toBeGreaterThan(THRESHOLDS.MAIN_MAX_SWITCH_COST_USD);
+
+    jevAnswers = { ...jevAnswers, model: "haiku", effort: "low" };
+    const body = largeBody("easy chat", "what is 2+2");
+    await post(upgradesProxy, body);
+    expect(jevSeen).toHaveLength(2);
+    expect(upstreamSeen[1]!.text).toBe(JSON.stringify(body));
+    const down = (await journal(join(stateDir, "up"))).at(-1)!;
+    expect(down).toMatchObject({ source: "skipped", skip_reason: "switch_not_worth_it", routed: { alias: "sonnet", effort: "low" }, jev: { model: { choice: "haiku" } } });
+    expect(down.stay_cost).toBeLessThan(down.switch_cost!);
+    expect(logs.at(-1)).toMatch(/skipped switch_not_worth_it stay \$\d+\.\d{3} switch \$\d+\.\d{3}/);
+  });
+
+  test("overrides win over every guard, including on a large main context", async () => {
+    await post(proxy, largeBody("override chat", "!haiku !low count the files"));
+    expect(jevSeen).toHaveLength(0);
+    expect(upstreamSeen[0]!.body?.model).toBe("claude-haiku-4-5");
+    expect(await lastJson()).toMatchObject({ alias: "haiku", source: "override" });
+    await post(subagentsProxy, mainBody("!opus fix the flaky test"));
+    expect(upstreamSeen[1]!.body?.model).toBe("claude-opus-5");
   });
 });

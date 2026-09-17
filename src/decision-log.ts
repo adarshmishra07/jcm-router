@@ -5,7 +5,7 @@ import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Decision, DecisionSource, RequestKind } from "./decide.ts";
 import type { JevAnswer } from "./jev.ts";
-import type { Effort, ModelAlias } from "./routing-policy.ts";
+import type { Effort, ModelAlias, SkipReason } from "./routing-policy.ts";
 import type { Usage } from "./usage.ts";
 
 export const PROMPT_PREVIEW_CHARS = 300;
@@ -17,8 +17,13 @@ export type DecisionRecord = {
   kind?: RequestKind;
   turn: "new" | "continuation";
   source: DecisionSource | "dry_run";
+  skip_reason?: SkipReason;
   requested: { model: string; effort: Effort | null };
   routed: { alias: ModelAlias | null; model: string; effort: Effort | null };
+  context_tokens: number;
+  // Present when the switch guard ran: what this turn costs staying on the cached model versus switching, in USD.
+  stay_cost?: number;
+  switch_cost?: number;
   jev: { ms: number; model: JevAnswer; effort: JevAnswer; is_followup: number } | null;
   jev_error?: string;
   prompt_preview?: string;
@@ -28,6 +33,9 @@ export type DecisionRecord = {
 
 const clock = (iso: string): string => iso.slice(11, 19);
 const oneLine = (s: string, max: number): string => JSON.stringify(s.replace(/\s+/g, " ").slice(0, max));
+const kTokens = (n: number): string => `${Math.round(n / 1000)}K`;
+const costs = (r: { stay_cost?: number; switch_cost?: number }): string =>
+  r.stay_cost !== undefined && r.switch_cost !== undefined ? ` stay $${r.stay_cost.toFixed(3)} switch $${r.switch_cost.toFixed(3)}` : "";
 
 export function formatLine(r: Omit<DecisionRecord, "usage">, decision: Decision): string {
   const target = `${r.routed.alias ?? r.routed.model}/${r.routed.effort ?? "default"}`;
@@ -36,16 +44,19 @@ export function formatLine(r: Omit<DecisionRecord, "usage">, decision: Decision)
       ? "cached"
       : r.source === "override"
         ? "override"
-        : r.source === "followup"
-          ? `followup ${decision.confidences.is_followup?.toFixed(2) ?? ""}`.trim()
-          : r.source === "fallback"
-            ? `fallback${r.jev_error ? ` (jev: ${r.jev_error})` : ""}`
-            : `jev ${decision.confidences.model?.toFixed(2) ?? "?"}/${decision.confidences.effort?.toFixed(2) ?? "?"} ${r.jev?.ms ?? 0}ms`;
+        : r.source === "skipped"
+          ? `skipped ${r.skip_reason}${costs(r)}`
+          : r.source === "followup"
+            ? `followup ${decision.confidences.is_followup?.toFixed(2) ?? ""}`.trim()
+            : r.source === "fallback"
+              ? `fallback${r.jev_error ? ` (jev: ${r.jev_error})` : ""}`
+              : `jev ${decision.confidences.model?.toFixed(2) ?? "?"}/${decision.confidences.effort?.toFixed(2) ?? "?"} ${r.jev?.ms ?? 0}ms${costs(r)}`;
   const parts = [
     clock(r.at),
     r.turn === "new" ? "new " : "cont",
     `#${r.conv}${r.kind ? ` ${r.kind}` : ""}`,
     target.padEnd(12),
+    kTokens(r.context_tokens).padStart(5),
     how.padEnd(22),
     `${r.upstream.status} in ${(r.upstream.ms_to_headers / 1000).toFixed(1)}s`,
     r.upstream.retried_with_original ? "RETRIED" : "",

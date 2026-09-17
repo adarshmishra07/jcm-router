@@ -4,12 +4,13 @@
 import { join } from "node:path";
 import { DecisionCache } from "./cache.ts";
 import { classifyRequest, requestKind, type MessagesBody, type Turn } from "./conversation.ts";
-import { aliasOfModel, decide, isNoop, parseOverrides, requestedOf, type Decision, type RequestKind, type Requested } from "./decide.ts";
+import { estimateContextTokens } from "./cost.ts";
+import { aliasOfModel, decide, isNoop, isOverridden, parseOverrides, requestedOf, type Decision, type RequestKind, type Requested } from "./decide.ts";
 import { appendRecord, formatLine, writeLastDecision, PROMPT_PREVIEW_CHARS, type DecisionRecord } from "./decision-log.ts";
 import { askJev, type JevClient, type JevResult } from "./jev.ts";
 import { forward, isRewriteRejection, withoutLongContextBeta } from "./proxy.ts";
 import { applyDecision } from "./rewrite.ts";
-import { MODELS, QUESTIONS, buildState } from "./routing-policy.ts";
+import { MODELS, QUESTIONS, buildState, skipBeforeAsking, type ScopePolicy } from "./routing-policy.ts";
 import { teeUsage } from "./usage.ts";
 
 export type ServerOptions = {
@@ -19,6 +20,7 @@ export type ServerOptions = {
   dryRun: boolean;
   logPrompts: boolean;
   stateDir: string;
+  policy: ScopePolicy;
   log: (line: string) => void;
 };
 
@@ -42,13 +44,14 @@ export function startServer(o: ServerOptions) {
   async function routeNewTurn(
     turn: Extract<Turn, { kind: "new" }>,
     requested: Requested,
-    bodyChars: number,
+    contextTokens: number,
     kind: RequestKind | undefined,
   ): Promise<{ decision: Decision; jev: JevResult | null }> {
     const overrides = parseOverrides(turn.prompt);
     const previous = turn.previousKey ? cache.get(turn.previousKey) : null;
+    const skip = skipBeforeAsking({ kind, contextTokens, overridden: isOverridden(overrides), policy: o.policy });
     const fullyOverridden = overrides.alias !== undefined && overrides.effort !== undefined;
-    const jev = fullyOverridden
+    const jev = skip || fullyOverridden
       ? null
       : await askJev(
           o.jev,
@@ -60,7 +63,10 @@ export function startServer(o: ServerOptions) {
           QUESTIONS,
         );
     const answers = jev?.ok ? jev.answers : null;
-    return { decision: decide({ key: turn.key, kind, requested, overrides, answers, previous, jevMs: jev?.ms ?? null, bodyChars }), jev };
+    return {
+      decision: decide({ key: turn.key, kind, requested, overrides, answers, previous, jevMs: jev?.ms ?? null, contextTokens, skip, policy: o.policy }),
+      jev,
+    };
   }
 
   async function handleMessages(req: Request): Promise<Response> {
@@ -70,14 +76,16 @@ export function startServer(o: ServerOptions) {
     if (!body || turn.kind === "passthrough") return forward(o.upstream, req, text);
 
     const requested = requestedOf(body);
+    const contextTokens = estimateContextTokens(text.length);
     let decision: Decision;
     let jev: JevResult | null = null;
     if (turn.kind === "continuation") {
       const cached = cache.get(turn.key);
       if (!cached) return forward(o.upstream, req, text);
-      decision = { ...cached, source: "cached", at: new Date().toISOString() };
+      const { skipReason: _skip, cost: _cost, ...rest } = cached; // the guard ran once, on the new turn
+      decision = { ...rest, source: "cached", at: new Date().toISOString() };
     } else {
-      ({ decision, jev } = await routeNewTurn(turn, requested, text.length, requestKind(body)));
+      ({ decision, jev } = await routeNewTurn(turn, requested, contextTokens, requestKind(body)));
     }
     cache.set(turn.key, decision);
     await safely("last.json", writeLastDecision(lastPath, decision));
@@ -104,8 +112,11 @@ export function startServer(o: ServerOptions) {
       kind: decision.kind,
       turn: turn.kind === "new" ? "new" : "continuation",
       source: o.dryRun ? "dry_run" : decision.source,
+      ...(decision.skipReason ? { skip_reason: decision.skipReason } : {}),
       requested,
       routed: { alias: decision.alias, model: decision.model, effort: decision.effort },
+      context_tokens: contextTokens,
+      ...(decision.cost ? { stay_cost: decision.cost.stay, switch_cost: decision.cost.switch } : {}),
       jev: jev?.ok
         ? { ms: jev.ms, model: jev.answers.model!, effort: jev.answers.effort!, is_followup: decision.confidences.is_followup ?? 0 }
         : null,

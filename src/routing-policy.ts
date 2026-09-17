@@ -1,6 +1,8 @@
 // Everything a human should review to tune routing lives in this file:
-// the model catalog, the Jev questions, the state Jev sees, and the thresholds.
+// the model catalog, the Jev questions, the state Jev sees, the thresholds, and the scope rules.
 
+import { PRICES, switchPaysOff } from "./cost.ts";
+import type { RequestKind } from "./decide.ts";
 import type { JevQuestion } from "./jev.ts";
 
 export const MODELS = {
@@ -48,7 +50,53 @@ export const THRESHOLDS = {
   FOLLOWUP_MIN_NOUL: 0.7,
   // Never send a large context to haiku (200K window). Tokens estimated as body chars / 4.
   HAIKU_MAX_TOKENS: 150_000,
+  // Main chat only. Above this many context tokens Jev is not asked at all: a switch would re-cache the whole
+  // history. A fresh Claude Code chat already carries 50 to 70K tokens of system prompt and tool schemas.
+  MAIN_MAX_CONTEXT_TOKENS: 100_000,
+  // Main chat only. A switch may cost at most this much more than staying, this turn (see cost.ts).
+  MAIN_MAX_SWITCH_COST_USD: 0.25,
 } as const;
+
+// Scope: where routing is allowed to change the model.
+// Subagents start with a fresh, small context and nothing cached to lose, so they are always routed.
+// The main chat (and anything not identifiably Claude Code) is routed only while a switch is cheap, because prompt
+// caches are per model and an effort change invalidates the messages cache too.
+// Future upgrade path: the mid-conversation-output-config-2026-07-01 beta (Opus 5, Fable 5.1) lets effort change
+// without a cache miss via a system message with empty content; effort-only changes would then skip the guard.
+export const ROUTER_SCOPES = ["subagents", "all"] as const;
+export type RouterScope = (typeof ROUTER_SCOPES)[number];
+export type ScopePolicy = { scope: RouterScope; mainUpgrades: boolean };
+export type SkipReason = "scope" | "context_too_large" | "switch_not_worth_it";
+
+// Before Jev is called. A skip here means no Jev latency and no Jev spend. Overrides bypass every guard.
+export function skipBeforeAsking(input: { kind: RequestKind | undefined; contextTokens: number; overridden: boolean; policy: ScopePolicy }): SkipReason | null {
+  if (input.overridden || input.kind === "subagent") return null;
+  if (input.policy.scope === "subagents") return "scope";
+  // With ROUTER_MAIN_UPGRADES Jev is still asked, so a confident upgrade can go through guardSwitch.
+  if (input.contextTokens > THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS && !input.policy.mainUpgrades) return "context_too_large";
+  return null;
+}
+
+export type Target = { alias: ModelAlias | null; effort: Effort | null };
+export type SwitchCost = { stay: number; switch: number };
+
+// After a candidate is chosen. `from` is where the conversation's cache lives: the previous routed decision, or the
+// request if none is known. Upgrades with ROUTER_MAIN_UPGRADES deliberately spend more for quality.
+export function guardSwitch(input: { kind: RequestKind | undefined; contextTokens: number; from: Target; to: Target; policy: ScopePolicy }): {
+  skip: SkipReason | null;
+  cost?: SwitchCost;
+} {
+  const { from, to } = input;
+  if (input.kind === "subagent") return { skip: null };
+  if (from.alias === null || to.alias === null) return { skip: null }; // unknown model, cannot be priced
+  if (from.alias === to.alias && from.effort === to.effort) return { skip: null }; // nothing changes, nothing to re-cache
+  const c = switchPaysOff({ contextTokens: input.contextTokens, from: from.alias, to: to.alias, maxSwitchCost: THRESHOLDS.MAIN_MAX_SWITCH_COST_USD });
+  const cost = { stay: c.stayCost, switch: c.switchCost };
+  const upgrade = PRICES[to.alias].input > PRICES[from.alias].input;
+  const tooLarge = input.contextTokens > THRESHOLDS.MAIN_MAX_CONTEXT_TOKENS;
+  const allowed = (upgrade && input.policy.mainUpgrades) || (!tooLarge && c.worth);
+  return { skip: allowed ? null : "switch_not_worth_it", cost };
+}
 
 export const LIMITS = {
   USER_MESSAGE_MAX_CHARS: 6000,

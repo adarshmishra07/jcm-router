@@ -2,6 +2,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ROUTER_SCOPES, type RouterScope } from "./routing-policy.ts";
 
 export type Config = Readonly<{
   typesafeApiKey: string;
@@ -11,6 +12,8 @@ export type Config = Readonly<{
   dryRun: boolean;
   logPrompts: boolean;
   stateDir: string;
+  scope: RouterScope;
+  mainUpgrades: boolean;
 }>;
 
 export const DEFAULTS = {
@@ -18,6 +21,7 @@ export const DEFAULTS = {
   anthropicUpstream: "https://api.anthropic.com",
   typesafeApiUrl: "https://api.typesafe.ai",
   stateDir: () => join(homedir(), ".claude-router"),
+  scope: "all",
 } as const;
 
 const API_KEY_PREFIX = "apikey_";
@@ -61,10 +65,14 @@ export function parseEnv(env: Env): Parsed {
 
   const stateDir = env.ROUTER_STATE_DIR || DEFAULTS.stateDir();
 
+  const scope = (env.ROUTER_SCOPE ?? DEFAULTS.scope) as RouterScope;
+  if (!ROUTER_SCOPES.includes(scope)) errors.push(`ROUTER_SCOPE must be one of ${ROUTER_SCOPES.join(", ")}`);
+  const mainUpgrades = bool("ROUTER_MAIN_UPGRADES", env.ROUTER_MAIN_UPGRADES, false, errors);
+
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    config: Object.freeze({ typesafeApiKey, typesafeApiUrl, port, anthropicUpstream, dryRun, logPrompts, stateDir }),
+    config: Object.freeze({ typesafeApiKey, typesafeApiUrl, port, anthropicUpstream, dryRun, logPrompts, stateDir, scope, mainUpgrades }),
   };
 }
 

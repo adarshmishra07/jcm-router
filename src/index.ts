@@ -12,6 +12,7 @@ const server = startServer({
   dryRun: config.dryRun,
   logPrompts: config.logPrompts,
   stateDir: config.stateDir,
+  policy: { scope: config.scope, mainUpgrades: config.mainUpgrades },
   log,
 });
 

@@ -1,9 +1,9 @@
-// Turns Jev answers, manual overrides and the previous decision into one concrete Decision.
+// Turns Jev answers, manual overrides, the previous decision and the scope policy into one concrete Decision.
 
 import type { JevAnswer, JevAnswers } from "./jev.ts";
-import { EFFORTS, MODELS, THRESHOLDS, type Effort, type ModelAlias } from "./routing-policy.ts";
+import { EFFORTS, MODELS, THRESHOLDS, guardSwitch, type Effort, type ModelAlias, type ScopePolicy, type SkipReason, type SwitchCost, type Target } from "./routing-policy.ts";
 
-export type DecisionSource = "jev" | "override" | "followup" | "fallback" | "cached";
+export type DecisionSource = "jev" | "override" | "followup" | "fallback" | "cached" | "skipped";
 
 export type RequestKind = "main" | "subagent";
 
@@ -14,6 +14,8 @@ export type Decision = {
   model: string;
   effort: Effort | null;
   source: DecisionSource;
+  skipReason?: SkipReason;
+  cost?: SwitchCost;
   confidences: { model?: number; effort?: number; is_followup?: number };
   jevMs: number | null;
   at: string;
@@ -44,6 +46,8 @@ export function parseOverrides(prompt: string): Overrides {
   return overrides;
 }
 
+export const isOverridden = (o: Overrides): boolean => o.alias !== undefined || o.effort !== undefined;
+
 export const aliasOfModel = (model: string): ModelAlias | null =>
   (Object.keys(MODELS) as ModelAlias[]).find((a) => MODELS[a].id === model) ?? null;
 
@@ -60,7 +64,9 @@ export function decide(input: {
   answers: JevAnswers | null;
   previous: Decision | null;
   jevMs: number | null;
-  bodyChars: number;
+  contextTokens: number;
+  skip: SkipReason | null;
+  policy: ScopePolicy;
 }): Decision {
   const { requested, overrides, answers, previous } = input;
   const followupNoul = answers?.is_followup?.type === "noul" ? answers.is_followup.noul : undefined;
@@ -72,24 +78,30 @@ export function decide(input: {
   const chosenAlias = overrides.alias ?? (followup ? previous.alias : isAlias(jevAlias) ? jevAlias : null) ?? aliasOfModel(requested.model);
   const chosenEffort = overrides.effort ?? (followup ? previous.effort : isEffort(jevEffort) ? jevEffort : null) ?? requested.effort;
 
-  const tooBigForHaiku = input.bodyChars / 4 > THRESHOLDS.HAIKU_MAX_TOKENS;
+  const tooBigForHaiku = input.contextTokens > THRESHOLDS.HAIKU_MAX_TOKENS;
   const alias = chosenAlias === "haiku" && tooBigForHaiku ? "sonnet" : chosenAlias;
+  const effort = alias && !MODELS[alias].supportsEffort ? null : chosenEffort;
 
-  const source: DecisionSource =
-    overrides.alias || overrides.effort ? "override" : followup ? "followup" : answers ? "jev" : "fallback";
+  // Where this conversation's prompt cache lives. Claude Code always sends the launched model, so after a routed
+  // turn the cache is on the routed model, not the requested one.
+  const from: Target = previous ? { alias: previous.alias, effort: previous.effort } : { alias: aliasOfModel(requested.model), effort: requested.effort };
+  const fromModel = previous ? previous.model : requested.model;
+
+  const source: DecisionSource = isOverridden(overrides) ? "override" : followup ? "followup" : answers ? "jev" : "fallback";
+  const guard = input.skip ? { skip: input.skip } : source === "override" ? { skip: null } : guardSwitch({ kind: input.kind, contextTokens: input.contextTokens, from, to: { alias, effort }, policy: input.policy });
 
   const model = answers?.model;
-  const effort = answers?.effort;
+  const jevEffortAnswer = answers?.effort;
   return {
     conv: input.key.slice(0, 8),
     ...(input.kind ? { kind: input.kind } : {}),
-    alias,
-    model: alias ? MODELS[alias].id : requested.model,
-    effort: alias && !MODELS[alias].supportsEffort ? null : chosenEffort,
-    source,
+    ...(guard.skip
+      ? { alias: from.alias, model: fromModel, effort: from.effort, source: "skipped" as const, skipReason: guard.skip }
+      : { alias, model: alias ? MODELS[alias].id : requested.model, effort, source }),
+    ...("cost" in guard && guard.cost ? { cost: guard.cost } : {}),
     confidences: {
       ...(model?.type === "choice" ? { model: model.confidence } : {}),
-      ...(effort?.type === "choice" ? { effort: effort.confidence } : {}),
+      ...(jevEffortAnswer?.type === "choice" ? { effort: jevEffortAnswer.confidence } : {}),
       ...(followupNoul !== undefined ? { is_followup: followupNoul } : {}),
     },
     jevMs: input.jevMs,
