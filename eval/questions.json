@@ -1,0 +1,107 @@
+{
+  "model": {
+    "type": "choice",
+    "instructions": {
+      "question": "Which model tier fits the task in `latest_user_message`?",
+      "context": "The task is carried out by an AI coding agent (Claude Code) that can read and edit files, run shell commands, and search the web. Judge only the task in `latest_user_message`. Use `previous_assistant_reply` only to resolve references like 'that', 'it', or 'the second option'.",
+      "focus": "Pick the cheapest tier that would reliably get this right. Judge difficulty and blast radius, not length of the message."
+    },
+    "criteria": {
+      "haiku": {
+        "what": "Trivial, mechanical, or lookup work where a wrong answer is cheap and obvious: rename a symbol, fix a typo, format code, answer a factual question, list files, run one command and report the result.",
+        "not_for": "Anything that needs understanding of how several parts of the code interact, or any design choice. That is sonnet or above.",
+        "examples": [
+          "What is 2+2? answer only the number",
+          "Run ls in this folder and count the entries",
+          "Rename `fooBar` to `barBaz` in utils.ts",
+          "What does this regex match?"
+        ]
+      },
+      "sonnet": {
+        "what": "Everyday engineering with a clear scope: add a feature in one area, write or fix tests, debug a bug that has a known reproduction, explain a module, small refactors.",
+        "not_for": "Trivial one-step edits (haiku). Work spanning many files, subtle bugs, or decisions where a wrong design is expensive (opus).",
+        "examples": [
+          "Add a --json flag to the CLI and cover it with tests",
+          "Why does this test fail when run in parallel? Fix it",
+          "Write a function that parses this date format"
+        ]
+      },
+      "opus": {
+        "what": "Hard engineering: changes across many files, subtle or intermittent bugs, concurrency, performance, security-sensitive code (auth, payments, permissions), designing an API or data model, reviewing a large diff.",
+        "not_for": "Routine bounded work (sonnet). Open-ended research or codebase-wide rewrites where the plan itself is the hard part (fable).",
+        "examples": [
+          "Migrate the auth middleware to support multiple tenants",
+          "Find the race condition causing duplicate orders",
+          "Review this PR for security issues"
+        ]
+      },
+      "fable": {
+        "what": "The hardest and longest work: ambiguous goals that need research and planning before code, large refactors or migrations across a codebase, architecture with many tradeoffs, tasks where a mistake is very costly and hard to undo.",
+        "not_for": "Anything with a clear, bounded scope, even if difficult (opus).",
+        "examples": [
+          "Design a plan for migrating a monolith's auth to a multi-tenant OAuth service",
+          "Rewrite the build system and keep everything green",
+          "Investigate why p99 latency doubled last month across all services"
+        ]
+      }
+    }
+  },
+  "effort": {
+    "type": "choice",
+    "instructions": {
+      "question": "How much deliberation does the task in `latest_user_message` need before answering or acting?",
+      "context": "The task is carried out by an AI coding agent (Claude Code) that can read and edit files, run shell commands, and search the web. Judge only the task in `latest_user_message`. Use `previous_assistant_reply` only to resolve references like 'that', 'it', or 'the second option'.",
+      "focus": "More effort means slower and costlier. Pick the lowest level at which a careful engineer would still trust the result."
+    },
+    "criteria": {
+      "low": {
+        "what": "Quick one-pass answer. Simple task, or the user clearly wants speed.",
+        "not_for": "Anything where a first guess is often wrong.",
+        "examples": [
+          "What is 2+2?",
+          "Fix this typo",
+          "Show me the git log"
+        ]
+      },
+      "medium": {
+        "what": "Ordinary task that needs some checking but no deep deliberation.",
+        "not_for": "Tasks with several interacting parts (high).",
+        "examples": [
+          "Add a null check and a test for it",
+          "Explain what this function does"
+        ]
+      },
+      "high": {
+        "what": "Several moving parts. Should verify its work, read related code, and weigh alternatives.",
+        "not_for": "Problems where errors are likely even with care (xhigh).",
+        "examples": [
+          "Add a feature that touches the API, the DB layer and the tests",
+          "Debug why the cache returns stale data"
+        ]
+      },
+      "xhigh": {
+        "what": "Errors are likely without careful step-by-step reasoning: tricky bugs, subtle design, concurrency, correctness arguments.",
+        "not_for": "Bounded feature work (high). Problems where correctness must dominate all cost (max).",
+        "examples": [
+          "Find the race condition causing duplicate orders",
+          "Design the schema migration so it can be rolled back safely"
+        ]
+      },
+      "max": {
+        "what": "Correctness dominates cost and time: security analysis, complex algorithms, large migrations, anything hard to undo.",
+        "not_for": "Anything that is merely difficult (xhigh).",
+        "examples": [
+          "Audit the auth flow for privilege escalation",
+          "Plan the migration of the monolith to services"
+        ]
+      }
+    }
+  },
+  "is_followup": {
+    "type": "noul",
+    "instructions": {
+      "question": "Is `latest_user_message` a short continuation of `previous_assistant_reply` that only makes sense given that reply: a confirmation ('yes', 'do it', 'go ahead', 'continue'), a choice among options the assistant offered, or a small tweak to what was just proposed?",
+      "note": "If `previous_assistant_reply` is null the answer is no. A message that states a new task on its own is not a follow-up even if it is short."
+    }
+  }
+}

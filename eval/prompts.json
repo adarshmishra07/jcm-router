@@ -1,0 +1,77 @@
+[
+  { "prompt": "Fix the typo \"recieve\" in src/mailer.ts", "expect": { "tier": "trivial" } },
+  { "prompt": "What does the regex /^\\d{3}-\\d{2}$/ match?", "expect": { "tier": "trivial" } },
+  { "prompt": "Rename the function `fooBar` to `barBaz` in utils.ts and update its callers", "expect": { "tier": "trivial" } },
+  { "prompt": "Run git log --oneline -5 and show me the output", "expect": { "tier": "trivial" } },
+  { "prompt": "List every file in src/ that imports node:fs", "expect": { "tier": "trivial" } },
+  { "prompt": "Format this file with prettier", "expect": { "tier": "trivial" } },
+  { "prompt": "What port does the dev server listen on?", "expect": { "tier": "trivial" } },
+  { "prompt": "Bump the version in package.json to 0.3.0", "expect": { "tier": "trivial" } },
+  { "prompt": "Add a --json flag to the report CLI and cover it with a test", "expect": { "tier": "normal" } },
+  { "prompt": "Write a function that parses \"2026-09-17T06:45:39.079Z\" into a local date string, with tests", "expect": { "tier": "normal" } },
+  { "prompt": "This test fails only when the suite runs in parallel. Figure out why and fix it", "expect": { "tier": "normal" } },
+  { "prompt": "Explain what src/proxy.ts does and where it handles streaming", "expect": { "tier": "normal" } },
+  { "prompt": "Add pagination to the /orders endpoint, limit and cursor, and update the OpenAPI file", "expect": { "tier": "normal" } },
+  { "prompt": "Our retry helper gives up after one attempt. Fix it and add a unit test for the backoff", "expect": { "tier": "normal" } },
+  { "prompt": "Refactor this 90 line handler into smaller functions without changing behaviour", "expect": { "tier": "normal" } },
+  { "prompt": "Add a loading state and an error state to the settings page", "expect": { "tier": "normal" } },
+  { "prompt": "Write integration tests for the signup flow using the existing test server", "expect": { "tier": "normal" } },
+  { "prompt": "Add structured logging to the worker, one line per job with duration and outcome", "expect": { "tier": "normal" } },
+  { "prompt": "Find the race condition causing duplicate orders", "expect": { "tier": "hard", "note": "short prompt, genuinely hard" } },
+  { "prompt": "Migrate the auth middleware to support multiple tenants across the API, the session store and the admin app", "expect": { "tier": "hard" } },
+  { "prompt": "Review this diff for security issues before we ship it to production", "expect": { "tier": "hard" } },
+  { "prompt": "Audit the password reset flow for privilege escalation and account takeover", "expect": { "tier": "hard" } },
+  { "prompt": "Design the schema migration so it can be rolled back safely while both app versions are live", "expect": { "tier": "hard" } },
+  { "prompt": "p99 latency doubled last month across all services. Investigate and tell me what changed", "expect": { "tier": "hard" } },
+  { "prompt": "Plan the migration of our monolith's billing into a separate service, including the data cutover", "expect": { "tier": "hard" } },
+  { "prompt": "Rewrite the build system from webpack to vite and keep every test green", "expect": { "tier": "hard" } },
+  { "prompt": "Our websocket connections leak memory under load. Find the leak", "expect": { "tier": "hard" } },
+  { "prompt": "Decide whether we should use optimistic locking or a queue for inventory updates, and justify it", "expect": { "tier": "hard" } },
+  { "prompt": "Harden the file upload endpoint against path traversal and zip bombs", "expect": { "tier": "hard" } },
+  { "prompt": "yes do it",
+    "expect": { "tier": "hard", "followup": true, "note": "bare confirmation after a hard plan, must be detected as a follow-up rather than re-classified" },
+    "context": {
+      "previousReply": "Here is the plan for the multi-tenant auth migration. 1. Add a tenant_id column to sessions and backfill it. 2. Introduce a TenantContext resolved from the subdomain in the middleware. 3. Scope every query in the session store by tenant. 4. Migrate the admin app to the new middleware behind a flag. 5. Remove the flag once both apps are on it. Risks: the backfill locks the sessions table, so we do it in batches. Want me to start with step 1?",
+      "previousRouting": { "model": "opus", "effort": "xhigh" }
+    }
+  },
+  { "prompt": "continue",
+    "expect": { "tier": "hard", "followup": true, "note": "bare continuation" },
+    "context": {
+      "previousReply": "I have finished step 2 of the billing service extraction: the invoice writer now talks to the new service behind an interface. Next is the data cutover, which needs a dual-write window.",
+      "previousRouting": { "model": "fable", "effort": "max" }
+    }
+  },
+  { "prompt": "hmm",
+    "expect": { "tier": "hard", "followup": true, "note": "ambiguous grunt after a hard reply" },
+    "context": {
+      "previousReply": "The race condition is in the order worker: two consumers can pass the idempotency check before either writes the key, because the check and the write are not atomic. The fix is a conditional write on the key. That changes the failure mode for retries, so we should talk about it before I change it.",
+      "previousRouting": { "model": "opus", "effort": "xhigh" }
+    }
+  },
+  { "prompt": "the second one",
+    "expect": { "tier": "hard", "followup": true, "note": "choice among offered options" },
+    "context": {
+      "previousReply": "Two options for the cache: 1. Keep the per-conversation cache and accept the re-cache cost on a switch. 2. Pin the conversation to its first model for the whole session. Option 2 loses most of the routing benefit but keeps the cache warm.",
+      "previousRouting": { "model": "opus", "effort": "high" }
+    }
+  },
+  { "prompt": "why?",
+    "expect": { "tier": "hard", "followup": true, "note": "three word question after a long plan" },
+    "context": {
+      "previousReply": "I recommend we do not route the main chat at all and only route subagents. The main chat carries a 500K token cache and any model switch dumps it, which costs more than the cheaper model saves. Subagents start cold, so switching them is free.",
+      "previousRouting": { "model": "fable", "effort": "high" }
+    }
+  },
+  { "prompt": "Traceback (most recent call last):\n  File \"/app/worker.py\", line 212, in run\n    payload = json.loads(body)\n  File \"/usr/lib/python3.11/json/__init__.py\", line 346, in loads\n    return _default_decoder.decode(s)\n  File \"/usr/lib/python3.11/json/decoder.py\", line 337, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n  File \"/usr/lib/python3.11/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.idx) from None\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n  2026-09-17 06:12:44 worker INFO  retry 1/5 in 2s\n  2026-09-17 06:12:46 worker INFO  retry 2/5 in 4s\n  2026-09-17 06:12:50 worker INFO  retry 3/5 in 8s\n  2026-09-17 06:12:58 worker ERROR giving up on job 8812\n\nwhat line does it fail on?",
+    "expect": { "tier": "trivial", "note": "long pasted log, trivial question. Difficulty must not track length" }
+  },
+  { "prompt": "!haiku write me a compiler for a small lisp, including a garbage collector",
+    "expect": { "tier": "trivial", "override": "haiku", "note": "explicit override, decided before Jev is called" }
+  },
+  { "prompt": "!opus fix this typo", "expect": { "tier": "hard", "override": "opus", "note": "override upwards on a trivial task" } },
+  { "prompt": "What is 2+2? answer only the number", "expect": { "tier": "trivial" } },
+  { "prompt": "Delete the unused import in src/server.ts", "expect": { "tier": "trivial" } },
+  { "prompt": "Add a health check endpoint that returns uptime and version", "expect": { "tier": "normal" } },
+  { "prompt": "Our Stripe webhook sometimes double charges customers. Find out why and fix it", "expect": { "tier": "hard" } }
+]
